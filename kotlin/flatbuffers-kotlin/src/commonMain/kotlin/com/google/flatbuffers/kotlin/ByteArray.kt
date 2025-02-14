@@ -45,9 +45,7 @@ internal expect inline fun ByteArray.getFloat(index: Int): Float
 internal expect inline fun ByteArray.getDouble(index: Int): Double
 
 internal expect inline fun ByteArray.setUByte(index: Int, value: UByte)
-
-public expect inline fun ByteArray.setShort(index: Int, value: Short)
-
+internal expect inline fun ByteArray.setShort(index: Int, value: Short)
 internal expect inline fun ByteArray.setUShort(index: Int, value: UShort)
 
 internal expect inline fun ByteArray.setInt(index: Int, value: Int)

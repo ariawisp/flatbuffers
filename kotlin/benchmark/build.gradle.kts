@@ -1,28 +1,14 @@
-import groovy.xml.XmlParser
+import tasks.*
 
 plugins {
-  kotlin("multiplatform")
+  id("convention.multiplatform")
   id("org.jetbrains.kotlinx.benchmark")
   id("io.morethan.jmhreport")
   id("de.undercouch.download")
 }
 
 group = "com.google.flatbuffers.jmh"
-
 version = "2.0.0-SNAPSHOT"
-
-// Reads latest version from Java's runtime pom.xml,
-// so we can use it for benchmarking against Kotlin's
-// runtime
-fun readJavaFlatBufferVersion(): String {
-  val pom = XmlParser().parse(File("../java/pom.xml"))
-  val versionTag =
-    pom.children().find {
-      val node = it as groovy.util.Node
-      node.name().toString().contains("version")
-    } as groovy.util.Node
-  return versionTag.value().toString()
-}
 
 // This plugin generates a static html page with the aggregation
 // of all benchmarks ran. very useful visualization tool.
@@ -44,28 +30,21 @@ benchmark {
       include(".*FlatbufferBenchmark.*")
     }
   }
-  targets { register("jvm") }
+  targets {
+    register("jvm")
+  }
 }
 
 kotlin {
   jvm {
-    compilations {
-      val main by getting {}
-      // custom benchmark compilation
-      val benchmarks by
-        compilations.creating {
-          defaultSourceSet {
-            dependencies {
-              // Compile against the main compilation's compile classpath and outputs:
-              implementation(main.compileDependencyFiles + main.output.classesDirs)
-            }
-          }
-        }
-    }
+    withJava()
   }
 
   sourceSets {
-    val jvmMain by getting {
+    jvmMain {
+      kotlin.srcDir("src/jvmMain/generated/kotlin/")
+      kotlin.srcDir("src/jvmMain/generated/java/")
+
       dependencies {
         implementation(kotlin("stdlib-common"))
         implementation(project(":flatbuffers-kotlin"))
@@ -74,9 +53,14 @@ kotlin {
         implementation(libs.moshi.kotlin)
         implementation(libs.gson)
       }
-      kotlin.srcDir("src/jvmMain/generated/kotlin/")
-      kotlin.srcDir("src/jvmMain/generated/java/")
-      kotlin.srcDir("../../java/src/main/java")
+    }
+  }
+}
+
+java {
+  sourceSets {
+    val main by getting {
+      java.srcDir("../../java/src/main/java")
     }
   }
 }
@@ -89,41 +73,6 @@ tasks.register<de.undercouch.gradle.tasks.download.Download>("downloadMultipleFi
   src(listOf("$baseUrl/canada.json", "$baseUrl/twitter.json", "$baseUrl/citm_catalog.json"))
   dest(File("${project.projectDir.absolutePath}/src/jvmMain/resources"))
   overwrite(false)
-}
-
-abstract class GenerateFBTestClasses : DefaultTask() {
-  @get:InputFiles abstract val inputFiles: ConfigurableFileCollection
-
-  @get:Input abstract val includeFolder: Property<String>
-
-  @get:Input abstract val outputFolder: Property<String>
-
-  @get:Input abstract val variants: ListProperty<String>
-
-  @Inject
-  protected open fun getExecActionFactory(): org.gradle.process.internal.ExecActionFactory? {
-    throw UnsupportedOperationException()
-  }
-
-  init {
-    includeFolder.set("")
-  }
-
-  @TaskAction
-  fun compile() {
-    val execAction = getExecActionFactory()!!.newExecAction()
-    val sources = inputFiles.asPath.split(":")
-    val langs = variants.get().map { "--$it" }
-    val args = mutableListOf("flatc", "-o", outputFolder.get(), *langs.toTypedArray())
-    if (includeFolder.get().isNotEmpty()) {
-      args.add("-I")
-      args.add(includeFolder.get())
-    }
-    args.addAll(sources)
-    println(args)
-    execAction.commandLine = args
-    print(execAction.execute())
-  }
 }
 
 // Use the default greeting
