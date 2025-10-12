@@ -80,14 +80,19 @@ project(":cli") {
 
 project(":compiler-plugin") {
   dependencies {
+    add("implementation", project(":core-ast"))
     add("implementation", project(":core-semantics"))
     add("implementation", project(":compat"))
+    add("implementation", "org.jetbrains.kotlin:kotlin-compiler-embeddable:$kotlinVersion")
+    add("implementation", "org.jetbrains.kotlin:kotlin-reflect:$kotlinVersion")
   }
+
 }
 
 project(":compat") {
   dependencies {
     add("implementation", "org.jetbrains.kotlin:kotlin-reflect:$kotlinVersion")
+    add("implementation", "org.jetbrains.kotlin:kotlin-compiler-embeddable:$kotlinVersion")
   }
 }
 

@@ -577,6 +577,160 @@ constructor(
     return VectorOffset(endVector())
   }
 
+  /**
+   * Create a vector from a [BooleanArray].
+   *
+   * @param data values to be written into the vector
+   * @return offset to the vector
+   */
+  public fun createBooleanVector(data: BooleanArray): VectorOffset<Boolean> {
+    startVector(1, data.size, 1)
+    for (i in data.size - 1 downTo 0) {
+      add(data[i])
+    }
+    return VectorOffset(endVector())
+  }
+
+  /**
+   * Create a vector from a [UByteArray].
+   *
+   * @param data values to be written into the vector
+   * @return offset to the vector
+   */
+  public fun createUByteVector(data: UByteArray): VectorOffset<UByte> {
+    startVector(1, data.size, 1)
+    for (i in data.size - 1 downTo 0) {
+      add(data[i])
+    }
+    return VectorOffset(endVector())
+  }
+
+  /**
+   * Create a vector from a [ShortArray].
+   *
+   * @param data values to be written into the vector
+   * @return offset to the vector
+   */
+  public fun createShortVector(data: ShortArray): VectorOffset<Short> {
+    startVector(Short.SIZE_BYTES, data.size, Short.SIZE_BYTES)
+    for (i in data.size - 1 downTo 0) {
+      add(data[i])
+    }
+    return VectorOffset(endVector())
+  }
+
+  /**
+   * Create a vector from a [UShortArray].
+   *
+   * @param data values to be written into the vector
+   * @return offset to the vector
+   */
+  public fun createUShortVector(data: UShortArray): VectorOffset<UShort> {
+    startVector(Short.SIZE_BYTES, data.size, Short.SIZE_BYTES)
+    for (i in data.size - 1 downTo 0) {
+      add(data[i])
+    }
+    return VectorOffset(endVector())
+  }
+
+  /**
+   * Create a vector from an [IntArray].
+   *
+   * @param data values to be written into the vector
+   * @return offset to the vector
+   */
+  public fun createIntVector(data: IntArray): VectorOffset<Int> {
+    startVector(Int.SIZE_BYTES, data.size, Int.SIZE_BYTES)
+    for (i in data.size - 1 downTo 0) {
+      add(data[i])
+    }
+    return VectorOffset(endVector())
+  }
+
+  /**
+   * Create a vector from a [UIntArray].
+   *
+   * @param data values to be written into the vector
+   * @return offset to the vector
+   */
+  public fun createUIntVector(data: UIntArray): VectorOffset<UInt> {
+    startVector(Int.SIZE_BYTES, data.size, Int.SIZE_BYTES)
+    for (i in data.size - 1 downTo 0) {
+      add(data[i])
+    }
+    return VectorOffset(endVector())
+  }
+
+  /**
+   * Create a vector from a [LongArray].
+   *
+   * @param data values to be written into the vector
+   * @return offset to the vector
+   */
+  public fun createLongVector(data: LongArray): VectorOffset<Long> {
+    startVector(Long.SIZE_BYTES, data.size, Long.SIZE_BYTES)
+    for (i in data.size - 1 downTo 0) {
+      add(data[i])
+    }
+    return VectorOffset(endVector())
+  }
+
+  /**
+   * Create a vector from a [ULongArray].
+   *
+   * @param data values to be written into the vector
+   * @return offset to the vector
+   */
+  public fun createULongVector(data: ULongArray): VectorOffset<ULong> {
+    startVector(Long.SIZE_BYTES, data.size, Long.SIZE_BYTES)
+    for (i in data.size - 1 downTo 0) {
+      add(data[i])
+    }
+    return VectorOffset(endVector())
+  }
+
+  /**
+   * Create a vector from a [FloatArray].
+   *
+   * @param data values to be written into the vector
+   * @return offset to the vector
+   */
+  public fun createFloatVector(data: FloatArray): VectorOffset<Float> {
+    startVector(Float.SIZE_BYTES, data.size, Float.SIZE_BYTES)
+    for (i in data.size - 1 downTo 0) {
+      add(data[i])
+    }
+    return VectorOffset(endVector())
+  }
+
+  /**
+   * Create a vector from a [DoubleArray].
+   *
+   * @param data values to be written into the vector
+   * @return offset to the vector
+   */
+  public fun createDoubleVector(data: DoubleArray): VectorOffset<Double> {
+    startVector(Double.SIZE_BYTES, data.size, Double.SIZE_BYTES)
+    for (i in data.size - 1 downTo 0) {
+      add(data[i])
+    }
+    return VectorOffset(endVector())
+  }
+
+  /**
+   * Create a vector from an [OffsetArray].
+   *
+   * @param offsets values to be written into the vector
+   * @return offset to the vector
+   */
+  public fun <T> createOffsetVector(offsets: OffsetArray<T>): VectorOffset<T> {
+    startVector(Int.SIZE_BYTES, offsets.size, Int.SIZE_BYTES)
+    for (i in offsets.size - 1 downTo 0) {
+      add(offsets[i])
+    }
+    return VectorOffset(endVector())
+  }
+
   /** Should not be accessing the final buffer before it is finished. */
   public fun finished() {
     if (!finished)
