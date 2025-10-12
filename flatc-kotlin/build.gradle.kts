@@ -38,6 +38,7 @@ project(":core-parser") {
 project(":core-semantics") {
   dependencies {
     add("implementation", project(":core-ast"))
+    add("implementation", project(":core-parser"))
     add("testImplementation", project(":core-parser"))
   }
 }
@@ -68,6 +69,7 @@ project(":generator-java") {
 
 project(":cli") {
   dependencies {
+    add("implementation", project(":core-ast"))
     add("implementation", project(":core-parser"))
     add("implementation", project(":core-semantics"))
     add("implementation", project(":reflection-writer"))
