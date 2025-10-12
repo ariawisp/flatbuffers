@@ -38,6 +38,7 @@ project(":core-parser") {
 project(":core-semantics") {
   dependencies {
     add("implementation", project(":core-ast"))
+    add("testImplementation", project(":core-parser"))
   }
 }
 
