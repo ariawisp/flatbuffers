@@ -31,6 +31,7 @@ public sealed interface ResolvedDeclaration {
   public val qualifiedName: String
   public val docComment: DocComment?
   public val attributes: List<ResolvedAttribute>
+  public val span: SourceSpan?
 }
 
 public data class ResolvedTable(
@@ -41,6 +42,7 @@ public data class ResolvedTable(
   val constraints: Set<TableConstraint>,
   override val attributes: List<ResolvedAttribute>,
   override val docComment: DocComment?,
+  override val span: SourceSpan?,
 ) : ResolvedDeclaration
 
 public data class ResolvedStruct(
@@ -50,6 +52,7 @@ public data class ResolvedStruct(
   val fields: List<ResolvedField>,
   override val attributes: List<ResolvedAttribute>,
   override val docComment: DocComment?,
+  override val span: SourceSpan?,
 ) : ResolvedDeclaration
 
 public data class ResolvedEnum(
@@ -60,6 +63,7 @@ public data class ResolvedEnum(
   val values: List<ResolvedEnumValue>,
   override val attributes: List<ResolvedAttribute>,
   override val docComment: DocComment?,
+  override val span: SourceSpan?,
 ) : ResolvedDeclaration
 
 public data class ResolvedUnion(
@@ -69,6 +73,7 @@ public data class ResolvedUnion(
   val members: List<ResolvedUnionMember>,
   override val attributes: List<ResolvedAttribute>,
   override val docComment: DocComment?,
+  override val span: SourceSpan?,
 ) : ResolvedDeclaration
 
 public data class ResolvedRpcService(
@@ -78,6 +83,7 @@ public data class ResolvedRpcService(
   val methods: List<ResolvedRpcMethod>,
   override val attributes: List<ResolvedAttribute>,
   override val docComment: DocComment?,
+  override val span: SourceSpan?,
 ) : ResolvedDeclaration
 
 public data class ResolvedField(

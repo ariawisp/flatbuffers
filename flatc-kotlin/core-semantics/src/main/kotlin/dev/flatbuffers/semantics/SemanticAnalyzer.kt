@@ -174,6 +174,7 @@ private class DeclarationResolver(
       constraints = constraints,
       attributes = attributes,
       docComment = declaration.docComment,
+      span = declaration.span,
     )
   }
 
@@ -187,6 +188,7 @@ private class DeclarationResolver(
       fields = fields,
       attributes = attributes,
       docComment = declaration.docComment,
+      span = declaration.span,
     )
   }
 
@@ -212,6 +214,7 @@ private class DeclarationResolver(
       values = values,
       attributes = declaration.attributes.map { resolveAttribute(symbol.namespace, it) },
       docComment = declaration.docComment,
+      span = declaration.span,
     )
   }
 
@@ -234,6 +237,7 @@ private class DeclarationResolver(
       members = members,
       attributes = declaration.attributes.map { resolveAttribute(symbol.namespace, it) },
       docComment = declaration.docComment,
+      span = declaration.span,
     )
   }
 
@@ -259,6 +263,7 @@ private class DeclarationResolver(
       methods = methods,
       attributes = declaration.attributes.map { resolveAttribute(symbol.namespace, it) },
       docComment = declaration.docComment,
+      span = declaration.span,
     )
   }
 
@@ -358,6 +363,15 @@ private class DeclarationResolver(
   }
 
   private fun ResolvedUnresolvedType.toPlaceholderDeclaration(fullName: String): ResolvedDeclaration {
-    return ResolvedEnum(fullName.substringAfterLast('.'), fullName, null, ResolvedScalarType(ScalarType.INT, span), emptyList(), emptyList(), null)
+    return ResolvedEnum(
+      name = fullName.substringAfterLast('.'),
+      qualifiedName = fullName,
+      namespace = null,
+      baseType = ResolvedScalarType(ScalarType.INT, span),
+      values = emptyList(),
+      attributes = emptyList(),
+      docComment = null,
+      span = span,
+    )
   }
 }
