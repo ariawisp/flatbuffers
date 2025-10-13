@@ -93,6 +93,8 @@ internal class FlatbuffersFirDeclarationGenerator(
   private val offsetArraySpecsByAliasId: Map<ClassId, OffsetArraySpec>
   private val offsetArraySpecsByCallableId: Map<CallableId, OffsetArraySpec>
   private val enumArraySpecsByAliasId: Map<ClassId, EnumArraySpec>
+  @Suppress("unused")
+  private val schemaSourceIndex = SchemaSourceIndex()
 
   private data class ParameterSpec(
     val name: String,
