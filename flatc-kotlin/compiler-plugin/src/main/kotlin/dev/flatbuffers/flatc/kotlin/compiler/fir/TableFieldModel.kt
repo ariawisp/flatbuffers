@@ -45,6 +45,16 @@ internal fun ResolvedTable.toFieldModels(schemaIndex: SchemaIndex): List<TableFi
     )
   }
 
+internal fun ResolvedStruct.toFieldModels(schemaIndex: SchemaIndex): List<TableFieldModel> =
+  fields.mapIndexed { index, field ->
+    TableFieldModel(
+      index = index,
+      name = Name.identifier(field.name),
+      field = field,
+      kind = field.type.toFieldKind(schemaIndex),
+    )
+  }
+
 private fun ResolvedType.toFieldKind(schemaIndex: SchemaIndex): FieldKind =
   when (this) {
     is ResolvedScalarType -> FieldKind.Scalar(scalar)
