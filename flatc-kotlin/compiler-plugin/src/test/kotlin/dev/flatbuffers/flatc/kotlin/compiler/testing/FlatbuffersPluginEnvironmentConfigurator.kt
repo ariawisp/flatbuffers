@@ -1,8 +1,12 @@
 package dev.flatbuffers.flatc.kotlin.compiler.testing
 
-import dev.flatbuffers.flatc.kotlin.compiler.FlatbuffersCommandLineProcessor
 import dev.flatbuffers.flatc.kotlin.compiler.FlatbuffersCompilerPluginRegistrar
 import dev.flatbuffers.flatc.kotlin.compiler.options.FlatbuffersOption
+import dev.flatbuffers.flatc.kotlin.compiler.options.FlatbuffersPluginOptions
+import dev.flatbuffers.flatc.kotlin.compiler.options.addBfbsPath
+import dev.flatbuffers.flatc.kotlin.compiler.options.addIncludePath
+import dev.flatbuffers.flatc.kotlin.compiler.options.addSchemaPath
+import dev.flatbuffers.flatc.kotlin.compiler.options.setEnabled
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -23,18 +27,20 @@ fun TestConfigurationBuilder.configureFlatbuffersPlugin() {
 private class FlatbuffersCommandLineBridge(
   private val dataRoot: Path,
 ) {
-  private val processor = FlatbuffersCommandLineProcessor()
+  fun apply(configuration: CompilerConfiguration, module: TestModule) {
+    configuration.setEnabled(true)
 
-  fun apply(configuration: CompilerConfiguration, directives: RegisteredDirectives) {
-    processor.processOption(FlatbuffersOption.ENABLED.cliOption, "true", configuration)
-
-    directives[FlatbuffersDirectives.SCHEMA].forEach { value ->
+    val schemaValues = module.collectValues(FlatbuffersDirectives.FLATBUFFERS_SCHEMA).toList()
+    if (schemaValues.isEmpty()) {
+      error("No FLATBUFFERS_SCHEMA directives found for module ${module.name}")
+    }
+    schemaValues.forEach { value ->
       processPathOption(configuration, FlatbuffersOption.SCHEMA, value)
     }
-    directives[FlatbuffersDirectives.INCLUDE].forEach { value ->
+    module.collectValues(FlatbuffersDirectives.FLATBUFFERS_INCLUDE).forEach { value ->
       processPathOption(configuration, FlatbuffersOption.INCLUDE, value)
     }
-    directives[FlatbuffersDirectives.BFBS].forEach { value ->
+    module.collectValues(FlatbuffersDirectives.FLATBUFFERS_BFBS).forEach { value ->
       processPathOption(configuration, FlatbuffersOption.BFBS, value)
     }
   }
@@ -48,7 +54,23 @@ private class FlatbuffersCommandLineBridge(
     require(Files.exists(resolved)) {
       "Resolved path for ${option.cliOption.optionName} does not exist: $resolved"
     }
-    processor.processOption(option.cliOption, resolved.toString(), configuration)
+    when (option) {
+      FlatbuffersOption.SCHEMA -> configuration.addSchemaPath(resolved.toString())
+      FlatbuffersOption.INCLUDE -> configuration.addIncludePath(resolved.toString())
+      FlatbuffersOption.BFBS -> configuration.addBfbsPath(resolved.toString())
+      FlatbuffersOption.ENABLED,
+      FlatbuffersOption.DEBUG,
+      -> {}
+    }
+  }
+}
+
+private fun TestModule.collectValues(directive: org.jetbrains.kotlin.test.directives.model.StringDirective): Sequence<String> {
+  return sequence {
+    yieldAll(directives[directive])
+    files.forEach { file ->
+      yieldAll(file.directives[directive])
+    }
   }
 }
 
@@ -64,7 +86,14 @@ private class FlatbuffersPluginEnvironmentConfigurator(
   private val cliBridge = FlatbuffersCommandLineBridge(dataRoot)
 
   override fun configureCompilerConfiguration(configuration: CompilerConfiguration, module: TestModule) {
-    cliBridge.apply(configuration, module.directives)
+    cliBridge.apply(configuration, module)
+    val options = FlatbuffersPluginOptions.load(configuration)
+    check(options.schemaPaths.isNotEmpty()) {
+      val moduleValues = module.directives[FlatbuffersDirectives.FLATBUFFERS_SCHEMA]
+      val fileValues =
+        module.files.associate { file -> file.name to file.directives[FlatbuffersDirectives.FLATBUFFERS_SCHEMA] }
+      "Schema paths not configured for module ${module.name}. module=$moduleValues file=$fileValues"
+    }
   }
 
   @OptIn(ExperimentalCompilerApi::class)

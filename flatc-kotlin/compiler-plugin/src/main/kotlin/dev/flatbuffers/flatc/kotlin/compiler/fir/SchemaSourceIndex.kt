@@ -12,10 +12,10 @@ import org.jetbrains.kotlin.KtLightSourceElement
 import org.jetbrains.kotlin.KtRealSourceElementKind
 import org.jetbrains.kotlin.KtSourceElement
 import org.jetbrains.kotlin.KtSourceElementKind
-import org.jetbrains.kotlin.com.intellij.lang.LighterASTNode
-import org.jetbrains.kotlin.com.intellij.openapi.util.Ref
-import org.jetbrains.kotlin.com.intellij.psi.tree.IElementType
-import org.jetbrains.kotlin.com.intellij.util.diff.FlyweightCapableTreeStructure
+import com.intellij.lang.LighterASTNode
+import com.intellij.openapi.util.Ref
+import com.intellij.psi.tree.IElementType
+import com.intellij.util.diff.FlyweightCapableTreeStructure
 
 /**
  * Provides access to the original schema text so we can rehydrate [KtSourceElement] instances

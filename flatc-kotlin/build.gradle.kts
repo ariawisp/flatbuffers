@@ -96,8 +96,11 @@ project(":compiler-plugin") {
     add("implementation", project(":core-ast"))
     add("implementation", project(":core-semantics"))
     add("implementation", project(":compat"))
-    add("implementation", "org.jetbrains.kotlin:kotlin-compiler-embeddable:$kotlinVersion")
+    add("implementation", "org.jetbrains.kotlin:kotlin-compiler:$kotlinVersion")
     add("implementation", "org.jetbrains.kotlin:kotlin-reflect:$kotlinVersion")
+    add("compileOnly", "com.jetbrains.intellij.platform:core:$intellijVersion")
+    add("compileOnly", "com.jetbrains.intellij.platform:util-rt:$intellijVersion")
+    add("compileOnly", "com.jetbrains.intellij.platform:util-base:$intellijVersion")
     add("testImplementation", kotlin("test-junit5"))
     add("testImplementation", "org.junit.jupiter:junit-jupiter-api:5.10.2")
     add("testRuntimeOnly", "org.junit.jupiter:junit-jupiter-engine:5.10.2")
@@ -181,7 +184,7 @@ project(":compiler-plugin") {
 project(":compat") {
   dependencies {
     add("implementation", "org.jetbrains.kotlin:kotlin-reflect:$kotlinVersion")
-    add("implementation", "org.jetbrains.kotlin:kotlin-compiler-embeddable:$kotlinVersion")
+    add("implementation", "org.jetbrains.kotlin:kotlin-compiler:$kotlinVersion")
   }
 }
 

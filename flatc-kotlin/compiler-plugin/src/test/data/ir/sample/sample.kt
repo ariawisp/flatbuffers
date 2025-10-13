@@ -1,6 +1,7 @@
 // MODULE: main
-// FILE: sample.kt
 // FLATBUFFERS_SCHEMA: ir/sample/sample.fbs
+// IGNORE_FIR_DIAGNOSTICS
+// FILE: sample.kt
 
 package sample
 
