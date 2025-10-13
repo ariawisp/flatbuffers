@@ -10,7 +10,10 @@ import org.jetbrains.kotlin.fir.FirSession
 import org.jetbrains.kotlin.fir.extensions.ExperimentalTopLevelDeclarationsGenerationApi
 import org.jetbrains.kotlin.fir.extensions.FirDeclarationGenerationExtension
 import org.jetbrains.kotlin.fir.plugin.createTopLevelClass
+import org.jetbrains.kotlin.fir.extensions.NestedClassGenerationContext
+import org.jetbrains.kotlin.fir.plugin.createCompanionObject
 import org.jetbrains.kotlin.fir.symbols.impl.FirClassLikeSymbol
+import org.jetbrains.kotlin.fir.symbols.impl.FirClassSymbol
 import org.jetbrains.kotlin.fir.toFirResolvedTypeRef
 import org.jetbrains.kotlin.fir.types.constructClassLikeType
 import org.jetbrains.kotlin.name.ClassId
@@ -61,12 +64,45 @@ internal class FlatbuffersFirDeclarationGenerator(
       addAll(enumsByClassId.keys)
     }
 
+  private val companionName = Name.identifier("Companion")
+
   @ExperimentalTopLevelDeclarationsGenerationApi
   override fun generateTopLevelClassLikeDeclaration(classId: ClassId): FirClassLikeSymbol<*>? {
     tablesByClassId[classId]?.let { return generateTableClass(classId) }
     structsByClassId[classId]?.let { return generateStructClass(classId) }
     enumsByClassId[classId]?.let { return generateEnumClass(classId) }
     return null
+  }
+
+  override fun getNestedClassifiersNames(
+    classSymbol: FirClassSymbol<*>,
+    context: NestedClassGenerationContext,
+  ): Set<Name> {
+    val classId = classSymbol.classId
+    return when {
+      tablesByClassId.containsKey(classId) -> setOf(companionName)
+      structsByClassId.containsKey(classId) -> setOf(companionName)
+      enumsByClassId.containsKey(classId) -> setOf(companionName)
+      else -> emptySet()
+    }
+  }
+
+  override fun generateNestedClassLikeDeclaration(
+    owner: FirClassSymbol<*>,
+    name: Name,
+    context: NestedClassGenerationContext,
+  ): FirClassLikeSymbol<*>? {
+    if (name != companionName) return null
+    val classId = owner.classId
+    return when {
+      tablesByClassId.containsKey(classId) ->
+        createCompanionObject(owner, FlatbuffersFirKeys.TableCompanionObject).symbol
+      structsByClassId.containsKey(classId) ->
+        createCompanionObject(owner, FlatbuffersFirKeys.StructCompanionObject).symbol
+      enumsByClassId.containsKey(classId) ->
+        createCompanionObject(owner, FlatbuffersFirKeys.EnumCompanionObject).symbol
+      else -> null
+    }
   }
 
   @ExperimentalTopLevelDeclarationsGenerationApi

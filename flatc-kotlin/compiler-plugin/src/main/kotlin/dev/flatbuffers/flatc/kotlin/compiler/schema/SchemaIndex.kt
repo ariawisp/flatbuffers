@@ -5,7 +5,9 @@ import dev.flatbuffers.semantics.DiagnosticSeverity
 import dev.flatbuffers.semantics.ResolvedDeclaration
 import dev.flatbuffers.semantics.ResolvedNamedType
 import dev.flatbuffers.semantics.ResolvedSchema
+import dev.flatbuffers.semantics.ResolvedStruct
 import dev.flatbuffers.semantics.ResolvedTable
+import dev.flatbuffers.semantics.ResolvedUnion
 import dev.flatbuffers.semantics.SchemaProcessor
 import dev.flatbuffers.flatc.kotlin.compiler.options.FlatbuffersPluginOptions
 import java.nio.file.Path
@@ -31,6 +33,10 @@ internal class SchemaIndex private constructor(
   fun tableFor(classId: ClassId): ResolvedTable? = declarationFor(classId) as? ResolvedTable
 
   fun tableFor(fqName: String): ResolvedTable? = declarationFor(fqName) as? ResolvedTable
+
+  fun structFor(classId: ClassId): ResolvedStruct? = declarationFor(classId) as? ResolvedStruct
+
+  fun unionFor(classId: ClassId): ResolvedUnion? = declarationFor(classId) as? ResolvedUnion
 
   val rootTables: List<ResolvedTable> by lazy {
     schemas.flatMap { schema ->
