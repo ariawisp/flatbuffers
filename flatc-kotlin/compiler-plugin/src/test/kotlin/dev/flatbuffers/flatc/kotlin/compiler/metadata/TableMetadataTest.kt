@@ -4,10 +4,14 @@ import dev.flatbuffers.flatc.kotlin.compiler.options.FlatbuffersConfigurationKey
 import dev.flatbuffers.flatc.kotlin.compiler.options.FlatbuffersPluginOptions
 import dev.flatbuffers.flatc.kotlin.compiler.options.addSchemaPath
 import dev.flatbuffers.flatc.kotlin.compiler.schema.SchemaIndex
+import dev.flatbuffers.semantics.ResolvedEnum
+import java.nio.file.Path
 import java.nio.file.Paths
 import java.util.concurrent.CopyOnWriteArrayList
 import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
+import kotlin.io.path.createTempDirectory
+import kotlin.io.path.writeText
 import org.jetbrains.kotlin.cli.common.messages.CompilerMessageSeverity
 import org.jetbrains.kotlin.cli.common.messages.CompilerMessageSourceLocation
 import org.jetbrains.kotlin.cli.common.messages.MessageCollector
@@ -45,14 +49,28 @@ class TableMetadataTest {
     assertEquals("FooOffsetArray", aliasClassId.shortClassName.asString())
   }
 
+  @Test
+  fun `enum array alias naming matches legacy generator`() {
+    val schemaIndex = loadSchema(createEnumSchema().toString())
+    val enumDeclaration = schemaIndex.declarationFor("enum_test.Simple") as? ResolvedEnum
+    val resolvedEnum = assertNotNull(enumDeclaration, "enum_test.Simple enum should be present")
+
+    val aliasClassId = resolvedEnum.classId().enumArrayClassId()
+
+    assertEquals("enum_test", aliasClassId.packageFqName.asString())
+    assertEquals("SimpleArray", aliasClassId.shortClassName.asString())
+  }
+
   private fun loadSchema(vararg schemaPaths: String): SchemaIndex {
     val configuration =
       CompilerConfiguration().apply {
         put(FlatbuffersConfigurationKeys.ENABLED, true)
-    val workspaceRoot = Paths.get("..", "..").toAbsolutePath().normalize()
-    schemaPaths.forEach { relativePath ->
-      addSchemaPath(workspaceRoot.resolve(relativePath).toString())
-    }
+        val workspaceRoot = Paths.get("..", "..").toAbsolutePath().normalize()
+        schemaPaths.forEach { pathString ->
+          val path = Paths.get(pathString)
+          val absolutePath = if (path.isAbsolute) path else workspaceRoot.resolve(path)
+          addSchemaPath(absolutePath.toString())
+        }
       }
     val options = FlatbuffersPluginOptions.load(configuration)
     val collector = RecordingMessageCollector()
@@ -62,6 +80,21 @@ class TableMetadataTest {
     assertEquals(emptyList<String>(), collector.errors, "SchemaIndex emitted errors")
     return schemaIndex
   }
+}
+
+private fun createEnumSchema(): Path {
+  val dir = createTempDirectory("flatbuffers-enum-test")
+  val file = dir.resolve("enum_schema.fbs")
+  file.writeText(
+    """
+    namespace enum_test;
+    enum Simple:ubyte { Foo = 1, Bar = 2 }
+    table Holder { value: Simple; }
+    root_type Holder;
+    """
+      .trimIndent()
+  )
+  return file
 }
 
 private class RecordingMessageCollector : MessageCollector {

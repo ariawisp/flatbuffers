@@ -40,6 +40,9 @@ internal fun classIdFrom(
 internal fun ClassId.offsetArrayClassId(): ClassId =
   ClassId(packageFqName, Name.identifier("${shortClassName.asString()}OffsetArray"))
 
+internal fun ClassId.enumArrayClassId(): ClassId =
+  ClassId(packageFqName, Name.identifier("${shortClassName.asString()}Array"))
+
 internal fun ResolvedTable.classId(): ClassId = classIdFrom(namespace, name)
 internal fun ResolvedStruct.classId(): ClassId = classIdFrom(namespace, name)
 internal fun ResolvedEnum.classId(): ClassId = classIdFrom(namespace, name)

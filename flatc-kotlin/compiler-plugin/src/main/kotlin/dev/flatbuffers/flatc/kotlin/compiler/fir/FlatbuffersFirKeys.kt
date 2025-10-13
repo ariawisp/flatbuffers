@@ -35,6 +35,10 @@ internal object FlatbuffersFirKeys {
     override fun toString(): String = "FlatbuffersStructMemberFunction"
   }
 
+  data object StructProperty : GeneratedDeclarationKey() {
+    override fun toString(): String = "FlatbuffersStructProperty"
+  }
+
   data object StructCompanionFunction : GeneratedDeclarationKey() {
     override fun toString(): String = "FlatbuffersStructCompanionFunction"
   }
@@ -47,8 +51,16 @@ internal object FlatbuffersFirKeys {
     override fun toString(): String = "FlatbuffersEnumCompanionFunction"
   }
 
+  data object EnumCompanionProperty : GeneratedDeclarationKey() {
+    override fun toString(): String = "FlatbuffersEnumCompanionProperty"
+  }
+
   data object EnumCompanionObject : GeneratedDeclarationKey() {
     override fun toString(): String = "FlatbuffersEnumCompanionObject"
+  }
+
+  data object EnumProperty : GeneratedDeclarationKey() {
+    override fun toString(): String = "FlatbuffersEnumProperty"
   }
 
   data object OffsetArrayTypeAlias : GeneratedDeclarationKey() {
@@ -57,5 +69,9 @@ internal object FlatbuffersFirKeys {
 
   data object OffsetArrayConstructorFunction : GeneratedDeclarationKey() {
     override fun toString(): String = "FlatbuffersOffsetArrayConstructorFunction"
+  }
+
+  data object EnumArrayTypeAlias : GeneratedDeclarationKey() {
+    override fun toString(): String = "FlatbuffersEnumArrayTypeAlias"
   }
 }

@@ -2,6 +2,7 @@ package dev.flatbuffers.flatc.kotlin.compiler.fir
 
 import dev.flatbuffers.flatc.kotlin.compat.CompatContext
 import dev.flatbuffers.flatc.kotlin.compiler.metadata.classId
+import dev.flatbuffers.flatc.kotlin.compiler.metadata.enumArrayClassId
 import dev.flatbuffers.flatc.kotlin.compiler.metadata.offsetArrayClassId
 import dev.flatbuffers.flatc.kotlin.compiler.options.FlatbuffersPluginOptions
 import dev.flatbuffers.flatc.kotlin.compiler.schema.SchemaIndex
@@ -84,8 +85,14 @@ internal class FlatbuffersFirDeclarationGenerator(
   private val tablePropertyCache = mutableMapOf<ClassId, Map<Name, PropertySpec>>()
   private val tableFunctionCache = mutableMapOf<ClassId, Map<Name, List<FunctionSpec>>>()
   private val tableCompanionFunctionCache = mutableMapOf<ClassId, Map<Name, List<FunctionSpec>>>()
+  private val structPropertyCache = mutableMapOf<ClassId, Map<Name, PropertySpec>>()
+  private val structFunctionCache = mutableMapOf<ClassId, Map<Name, List<FunctionSpec>>>()
+  private val enumPropertyCache = mutableMapOf<ClassId, Map<Name, PropertySpec>>()
+  private val enumCompanionPropertyCache = mutableMapOf<ClassId, Map<Name, PropertySpec>>()
+  private val enumCompanionFunctionCache = mutableMapOf<ClassId, Map<Name, List<FunctionSpec>>>()
   private val offsetArraySpecsByAliasId: Map<ClassId, OffsetArraySpec>
   private val offsetArraySpecsByCallableId: Map<CallableId, OffsetArraySpec>
+  private val enumArraySpecsByAliasId: Map<ClassId, EnumArraySpec>
 
   private data class ParameterSpec(
     val name: String,
@@ -118,6 +125,11 @@ internal class FlatbuffersFirDeclarationGenerator(
     val lambdaReturnType: ConeKotlinType,
     val functionParameterType: ConeKotlinType,
     val callableId: CallableId,
+  )
+
+  private data class EnumArraySpec(
+    val aliasClassId: ClassId,
+    val expandedType: ConeKotlinType,
   )
 
   init {
@@ -153,6 +165,13 @@ internal class FlatbuffersFirDeclarationGenerator(
     }
     offsetArraySpecsByAliasId = offsetSpecs
     offsetArraySpecsByCallableId = offsetSpecs.values.associateBy { it.callableId }
+    val enumArraySpecs = linkedMapOf<ClassId, EnumArraySpec>()
+    enumsByClassId.values.forEach { enum ->
+      createEnumArraySpec(enum)?.let { spec ->
+        enumArraySpecs.putIfAbsent(spec.aliasClassId, spec)
+      }
+    }
+    enumArraySpecsByAliasId = enumArraySpecs
   }
 
   @ExperimentalTopLevelDeclarationsGenerationApi
@@ -162,6 +181,7 @@ internal class FlatbuffersFirDeclarationGenerator(
       addAll(structsByClassId.keys)
       addAll(enumsByClassId.keys)
       addAll(offsetArraySpecsByAliasId.keys)
+      addAll(enumArraySpecsByAliasId.keys)
     }
 
   @ExperimentalTopLevelDeclarationsGenerationApi
@@ -180,6 +200,7 @@ internal class FlatbuffersFirDeclarationGenerator(
     structsByClassId[classId]?.let { return generateStructClass(classId) }
     enumsByClassId[classId]?.let { return generateEnumClass(classId) }
     offsetArraySpecsByAliasId[classId]?.let { return generateOffsetArrayTypeAlias(it) }
+    enumArraySpecsByAliasId[classId]?.let { return generateEnumArrayTypeAlias(it) }
     return null
   }
 
@@ -235,6 +256,12 @@ internal class FlatbuffersFirDeclarationGenerator(
         structFieldsByClassId[classId]?.forEach { field -> add(field.name) }
       }
     }
+    enumsByClassId[classId]?.let { enum ->
+      val properties = enumPropertySpecs(enum)
+      return buildSet {
+        addAll(properties.keys)
+      }
+    }
     if (classId.shortClassName == companionName) {
       val outerClassId = classId.outerClassId ?: return emptySet()
       tablesByClassId[outerClassId]?.let { table ->
@@ -253,6 +280,14 @@ internal class FlatbuffersFirDeclarationGenerator(
         val createName = createStructFunctionName(struct)
         return buildSet {
           add(createName)
+        }
+      }
+      enumsByClassId[outerClassId]?.let { enum ->
+        val properties = enumCompanionPropertySpecs(enum)
+        val functions = enumCompanionFunctionSpecs(enum)
+        return buildSet {
+          addAll(properties.keys)
+          addAll(functions.keys)
         }
       }
     }
@@ -285,6 +320,11 @@ internal class FlatbuffersFirDeclarationGenerator(
       structsByClassId[outerClassId]?.let { struct ->
         return generateStructCompanionFunction(owner, struct, callableId)
       }
+      enumsByClassId[outerClassId]?.let { enum ->
+        return enumCompanionFunctionSpecs(enum)[callableId.callableName]
+          ?.map { createFunction(owner, it) }
+          ?: emptyList()
+      }
     }
     return emptyList()
   }
@@ -299,11 +339,20 @@ internal class FlatbuffersFirDeclarationGenerator(
       val propertySpec = tablePropertySpecs(table)[callableId.callableName] ?: return emptyList()
       return listOf(createProperty(owner, propertySpec))
     }
-    structFieldsByClassId[classId] ?: run {
-      if (classId.shortClassName == companionName) {
-        return emptyList()
+    structsByClassId[classId]?.let { struct ->
+      val propertySpec = structPropertySpecs(struct)[callableId.callableName] ?: return emptyList()
+      return listOf(createProperty(owner, propertySpec))
+    }
+    enumsByClassId[classId]?.let { enum ->
+      val propertySpec = enumPropertySpecs(enum)[callableId.callableName] ?: return emptyList()
+      return listOf(createProperty(owner, propertySpec))
+    }
+    if (classId.shortClassName == companionName) {
+      val outerClassId = classId.outerClassId ?: return emptyList()
+      enumsByClassId[outerClassId]?.let { enum ->
+        val propertySpec = enumCompanionPropertySpecs(enum)[callableId.callableName] ?: return emptyList()
+        return listOf(createProperty(owner, propertySpec))
       }
-      return emptyList()
     }
     return emptyList()
   }
@@ -324,7 +373,28 @@ internal class FlatbuffersFirDeclarationGenerator(
 
   @ExperimentalTopLevelDeclarationsGenerationApi
   private fun generateEnumClass(classId: ClassId): FirClassLikeSymbol<*> {
-    return createTopLevelClass(classId, FlatbuffersFirKeys.EnumClass).symbol
+    return createTopLevelClass(classId, FlatbuffersFirKeys.EnumClass) {
+      status {
+        isInline = true
+        isValue = true
+      }
+    }.symbol
+  }
+
+  @ExperimentalTopLevelDeclarationsGenerationApi
+  private fun generateEnumArrayTypeAlias(spec: EnumArraySpec): FirClassLikeSymbol<*> {
+    val typeAlias =
+      buildTypeAlias {
+        resolvePhase = FirResolvePhase.BODY_RESOLVE
+        moduleData = session.moduleData
+        origin = FlatbuffersFirKeys.EnumArrayTypeAlias.origin
+        scopeProvider = session.kotlinScopeProvider
+        status = FirResolvedDeclarationStatusImpl(Visibilities.Public, Modality.FINAL, EffectiveVisibility.Public)
+        name = spec.aliasClassId.shortClassName
+        symbol = FirTypeAliasSymbol(spec.aliasClassId)
+        expandedTypeRef = spec.expandedType.toFirResolvedTypeRef()
+      }
+    return typeAlias.symbol
   }
 
   private fun generateOffsetArrayTypeAlias(spec: OffsetArraySpec): FirClassLikeSymbol<*> {
@@ -395,6 +465,12 @@ internal class FlatbuffersFirDeclarationGenerator(
       functionParameterType = functionParameterType,
       callableId = callableId,
     )
+  }
+
+  private fun createEnumArraySpec(enum: ResolvedEnum): EnumArraySpec? {
+    val arrayType = scalarArrayType(enum.baseType.scalar) ?: return null
+    val aliasClassId = enum.classId().enumArrayClassId()
+    return EnumArraySpec(aliasClassId = aliasClassId, expandedType = arrayType)
   }
 
   private fun generateTableFunction(
@@ -475,7 +551,10 @@ internal class FlatbuffersFirDeclarationGenerator(
             valueParameter("buffer", readWriteBufferType, FlatbuffersFirKeys.StructMemberFunction)
           }.symbol
         )
-      else -> emptyList()
+      else ->
+        structFunctionSpecs(struct)[callableId.callableName]
+          ?.map { createFunction(owner, it) }
+          ?: emptyList()
     }
 
   private fun generateStructCompanionFunction(
@@ -491,10 +570,17 @@ internal class FlatbuffersFirDeclarationGenerator(
         val function =
           stubFunction(owner, FlatbuffersFirKeys.StructCompanionFunction, createName, offsetClassId.toType(structType)) {
             valueParameter("builder", flatBufferBuilderType, FlatbuffersFirKeys.StructCompanionFunction)
-            parameters.forEach { field ->
-              val parameterType = field.propertyType() ?: return@forEach
-              valueParameter(field.name.asString(), parameterType, FlatbuffersFirKeys.StructCompanionFunction)
-            }
+            parameters
+              .flatMap { field -> structCreateParameterSpecs(field) }
+              .forEach { parameter ->
+                valueParameter(
+                  name = parameter.name,
+                  type = parameter.type,
+                  key = parameter.key,
+                  hasDefaultValue = parameter.hasDefaultValue,
+                  isVararg = parameter.isVararg,
+                )
+              }
           }
         listOf(function.symbol)
       }
@@ -676,6 +762,137 @@ internal class FlatbuffersFirDeclarationGenerator(
         }
       }
       accumulator.mapValues { (_, value) -> value.toList() }
+    }
+
+  private fun structPropertySpecs(struct: ResolvedStruct): Map<Name, PropertySpec> =
+    structPropertyCache.getOrPut(struct.classId()) {
+      val fields = structFieldsByClassId[struct.classId()].orEmpty()
+      buildMap {
+        fields.forEach { field ->
+          when (val kind = field.kind) {
+            is FieldKind.Scalar ->
+              putIfAbsent(
+                field.name,
+                PropertySpec(field.name, scalarType(kind.scalar), FlatbuffersFirKeys.StructProperty),
+              )
+            is FieldKind.Struct -> {
+              val structType = kind.struct.classId().toType(nullable = true)
+              putIfAbsent(field.name, PropertySpec(field.name, structType, FlatbuffersFirKeys.StructProperty))
+            }
+            else -> Unit
+          }
+        }
+      }
+    }
+
+  private fun structFunctionSpecs(struct: ResolvedStruct): Map<Name, List<FunctionSpec>> =
+    structFunctionCache.getOrPut(struct.classId()) {
+      val fields = structFieldsByClassId[struct.classId()].orEmpty()
+      val accumulator = linkedMapOf<Name, MutableList<FunctionSpec>>()
+      fields.forEach { field ->
+        when (val kind = field.kind) {
+          is FieldKind.Struct -> {
+            val returnType = field.propertyType() ?: return@forEach
+            val parameterType = kind.struct.classId().toType()
+            accumulator.addFunction(
+              FunctionSpec(
+                name = field.name,
+                returnType = returnType,
+                parameters =
+                  listOf(
+                    ParameterSpec(
+                      name = "obj",
+                      type = parameterType,
+                      key = FlatbuffersFirKeys.StructMemberFunction,
+                    ),
+                  ),
+                key = FlatbuffersFirKeys.StructMemberFunction,
+              )
+            )
+          }
+          else -> Unit
+        }
+      }
+      accumulator.mapValues { (_, value) -> value.toList() }
+    }
+
+  private fun structCreateParameterSpecs(field: TableFieldModel): List<ParameterSpec> =
+    structCreateParameterSpecs(field, field.name.asString())
+
+  private fun structCreateParameterSpecs(
+    field: TableFieldModel,
+    parameterName: String,
+  ): List<ParameterSpec> =
+    when (val kind = field.kind) {
+      is FieldKind.Scalar ->
+        listOf(
+          ParameterSpec(parameterName, scalarType(kind.scalar), FlatbuffersFirKeys.StructCompanionFunction),
+        )
+      FieldKind.StringType ->
+        listOf(
+          ParameterSpec(parameterName, StandardClassIds.String.toType(), FlatbuffersFirKeys.StructCompanionFunction),
+        )
+      is FieldKind.Struct -> {
+        val nestedFields = structFieldsByClassId[kind.struct.classId()].orEmpty()
+        nestedFields.flatMap { nestedField ->
+          structCreateParameterSpecs(nestedField, "${parameterName}_${nestedField.name.asString()}")
+        }
+      }
+      else -> emptyList()
+    }
+
+  private fun enumPropertySpecs(enum: ResolvedEnum): Map<Name, PropertySpec> =
+    enumPropertyCache.getOrPut(enum.classId()) {
+      val valueName = Name.identifier("value")
+      mapOf(
+        valueName to PropertySpec(
+          name = valueName,
+          returnType = scalarType(enum.baseType.scalar),
+          key = FlatbuffersFirKeys.EnumProperty,
+        )
+      )
+    }
+
+  private fun enumCompanionPropertySpecs(enum: ResolvedEnum): Map<Name, PropertySpec> =
+    enumCompanionPropertyCache.getOrPut(enum.classId()) {
+      buildMap {
+        enum.values.forEach { enumValue ->
+          val name = Name.identifier(enumValue.name)
+          putIfAbsent(
+            name,
+            PropertySpec(name, enum.classId().toType(), FlatbuffersFirKeys.EnumCompanionProperty),
+          )
+        }
+        val namesProperty = Name.identifier("names")
+        val arrayType = StandardClassIds.Array.toType(StandardClassIds.String.toType())
+        putIfAbsent(
+          namesProperty,
+          PropertySpec(namesProperty, arrayType, FlatbuffersFirKeys.EnumCompanionProperty),
+        )
+      }
+    }
+
+  private fun enumCompanionFunctionSpecs(enum: ResolvedEnum): Map<Name, List<FunctionSpec>> =
+    enumCompanionFunctionCache.getOrPut(enum.classId()) {
+      val enumType = enum.classId().toType()
+      val nameFunction = Name.identifier("name")
+      mapOf(
+        nameFunction to listOf(
+          FunctionSpec(
+            name = nameFunction,
+            returnType = StandardClassIds.String.toType(),
+            parameters =
+              listOf(
+                ParameterSpec(
+                  name = "e",
+                  type = enumType,
+                  key = FlatbuffersFirKeys.EnumCompanionFunction,
+                ),
+              ),
+            key = FlatbuffersFirKeys.EnumCompanionFunction,
+          )
+        ),
+      )
     }
 
   private fun tableCompanionFunctionSpecs(table: ResolvedTable): Map<Name, List<FunctionSpec>> =
