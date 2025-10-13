@@ -28,6 +28,11 @@ import org.jetbrains.kotlin.fir.declarations.impl.FirResolvedDeclarationStatusIm
 import org.jetbrains.kotlin.fir.declarations.origin
 import org.jetbrains.kotlin.fir.plugin.createTopLevelClass
 import org.jetbrains.kotlin.fir.plugin.createCompanionObject
+import org.jetbrains.kotlin.fir.plugin.createConstructor
+import org.jetbrains.kotlin.fir.plugin.createDefaultPrivateConstructor
+import org.jetbrains.kotlin.fir.extensions.MemberGenerationContext
+import org.jetbrains.kotlin.fir.symbols.impl.FirConstructorSymbol
+import org.jetbrains.kotlin.name.SpecialNames
 import org.jetbrains.kotlin.fir.moduleData
 import org.jetbrains.kotlin.fir.scopes.kotlinScopeProvider
 import org.jetbrains.kotlin.fir.symbols.impl.FirClassLikeSymbol
@@ -252,6 +257,7 @@ internal class FlatbuffersFirDeclarationGenerator(
       val properties = tablePropertySpecs(table)
       val functions = tableFunctionSpecs(table)
       return buildSet {
+        add(SpecialNames.INIT)
         add(initName)
         add(resetName)
         addAll(properties.keys)
@@ -277,6 +283,7 @@ internal class FlatbuffersFirDeclarationGenerator(
         val endName = endFunctionName(table)
         val companionFunctions = tableCompanionFunctionSpecs(table)
         return buildSet {
+          add(SpecialNames.INIT)
           add(validateVersionName)
           add(asRootName)
           add(startName)
@@ -287,6 +294,7 @@ internal class FlatbuffersFirDeclarationGenerator(
       structsByClassId[outerClassId]?.let { struct ->
         val createName = createStructFunctionName(struct)
         return buildSet {
+          add(SpecialNames.INIT)
           add(createName)
         }
       }
@@ -294,6 +302,7 @@ internal class FlatbuffersFirDeclarationGenerator(
         val properties = enumCompanionPropertySpecs(enum)
         val functions = enumCompanionFunctionSpecs(enum)
         return buildSet {
+          add(SpecialNames.INIT)
           addAll(properties.keys)
           addAll(functions.keys)
         }
@@ -363,6 +372,43 @@ internal class FlatbuffersFirDeclarationGenerator(
       }
     }
     return emptyList()
+  }
+
+  override fun generateConstructors(context: MemberGenerationContext): List<FirConstructorSymbol> {
+    val owner = context.owner
+    return when (owner.origin) {
+      FlatbuffersFirKeys.TableCompanionObject.origin ->
+        listOf(createDefaultPrivateConstructor(owner, FlatbuffersFirKeys.TableCompanionObject).symbol)
+      FlatbuffersFirKeys.StructCompanionObject.origin ->
+        listOf(createDefaultPrivateConstructor(owner, FlatbuffersFirKeys.StructCompanionObject).symbol)
+      FlatbuffersFirKeys.EnumCompanionObject.origin ->
+        listOf(createDefaultPrivateConstructor(owner, FlatbuffersFirKeys.EnumCompanionObject).symbol)
+      FlatbuffersFirKeys.TableClass.origin ->
+        listOf(
+          createConstructor(
+              owner,
+              FlatbuffersFirKeys.TableClass,
+              isPrimary = true,
+              generateDelegatedNoArgConstructorCall = true,
+            ) {
+              visibility = Visibilities.Public
+            }
+            .symbol
+        )
+      FlatbuffersFirKeys.StructClass.origin ->
+        listOf(
+          createConstructor(
+              owner,
+              FlatbuffersFirKeys.StructClass,
+              isPrimary = true,
+              generateDelegatedNoArgConstructorCall = true,
+            ) {
+              visibility = Visibilities.Public
+            }
+            .symbol
+        )
+      else -> emptyList()
+    }
   }
 
   @ExperimentalTopLevelDeclarationsGenerationApi
