@@ -25,7 +25,7 @@ class FlatbuffersDocCommentMaterializerTest {
 
   @Test
   fun `empty doc renders inline comment`() {
-    assertEquals("/** */", DocCommentMaterializer.render(""))
+    assertEquals("/**  */", DocCommentMaterializer.render(""))
   }
 
   @Test

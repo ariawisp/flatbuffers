@@ -1,0 +1,9 @@
+namespace sample;
+
+/// table docs
+table Sample {
+  /// hp docs
+  hp:short = 123;
+}
+
+root_type Sample;

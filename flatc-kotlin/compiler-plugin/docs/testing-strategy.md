@@ -22,13 +22,22 @@ Purpose: verify that FIR stubs faithfully mirror the legacy generated API.
 
 Purpose: confirm IR lowerings build the same execution as legacy code.
 
-- **Approach:** reuse Kotlin's IR plugin test harness (`AbstractIrPluginTestCase`).
+- **Approach:** rely on Kotlin's internal compiler test framework. The bespoke
+  `AbstractFlatbuffersIrTest` extends `AbstractFirLightTreeJvmIrTextTest`, registers the plugin via
+  CLI options, and inspects the produced `IrModuleFragment` directly.
+- **Fixtures:** store schemas and Kotlin drivers under `compiler-plugin/src/test/data/ir/<case>`.
+  Each Kotlin file declares its schema dependencies with directives such as
+  `// FLATBUFFERS_SCHEMA: ir/sample/sample.fbs`.
 - **Assertions:**
-  - IR dump shows expected calls into runtime (e.g., `lookupField`, `createIntVector`).
-  - Binary-search body for `lookupByKey` generated correctly.
-  - Required-field `builder.required` invocations present.
-- **Artifacts:** store golden IR dumps (`ir/<schema>.txt`).
-- **Debug Aid:** add optional flag to emit `fir`/`ir` dumps for new schemas.
+  - Generated initialisers (`init` and `reset`) delegate to runtime entry points such as
+    `Table.reset`.
+  - Scalar accessors route through `lookupField`, emit the schema default literal, and read from the
+    appropriate `ReadWriteBuffer.get*` intrinsic.
+  - Companion helpers invoke the correct `FlatBufferBuilder.add` overload.
+  - Metadata (`FlatbuffersSchemaMetadata`) preserves schema documentation in both raw and rendered
+    forms.
+- **Debug Aid:** the Gradle test task exposes `flatbuffers.compilerPlugin.{jar,runtimeClasspath}` so
+  the packaged plugin and its runtime can be inspected alongside IR dumps when needed.
 
 ## 3. Bytecode / Runtime Integration Tests
 
