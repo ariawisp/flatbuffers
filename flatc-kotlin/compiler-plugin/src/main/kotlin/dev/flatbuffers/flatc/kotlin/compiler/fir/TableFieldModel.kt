@@ -1,6 +1,8 @@
 package dev.flatbuffers.flatc.kotlin.compiler.fir
 
 import dev.flatbuffers.ast.ScalarType
+import dev.flatbuffers.flatc.kotlin.compiler.metadata.classId
+import dev.flatbuffers.flatc.kotlin.compiler.metadata.isRequiredField
 import dev.flatbuffers.flatc.kotlin.compiler.schema.SchemaIndex
 import dev.flatbuffers.semantics.ResolvedArrayType
 import dev.flatbuffers.semantics.ResolvedField
@@ -14,7 +16,6 @@ import dev.flatbuffers.semantics.ResolvedUnion
 import dev.flatbuffers.semantics.ResolvedUnresolvedType
 import dev.flatbuffers.semantics.ResolvedVectorType
 import org.jetbrains.kotlin.name.ClassId
-import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.Name
 
 internal data class TableFieldModel(
@@ -23,6 +24,7 @@ internal data class TableFieldModel(
   val field: ResolvedField,
   val kind: FieldKind,
   val isKey: Boolean,
+  val isRequired: Boolean,
 )
 
 internal sealed interface FieldKind {
@@ -44,6 +46,7 @@ internal fun ResolvedTable.toFieldModels(schemaIndex: SchemaIndex): List<TableFi
       field = field,
       kind = field.type.toFieldKind(schemaIndex),
       isKey = attributes.any { attr -> attr.name == "key" || attr.fullName == "key" },
+      isRequired = field.isRequiredField(),
     )
   }
 
@@ -55,6 +58,7 @@ internal fun ResolvedStruct.toFieldModels(schemaIndex: SchemaIndex): List<TableF
       field = field,
       kind = field.type.toFieldKind(schemaIndex),
       isKey = false,
+      isRequired = field.isRequiredField(),
     )
   }
 
@@ -79,6 +83,3 @@ private fun ResolvedNamedType.toNamedKind(schemaIndex: SchemaIndex): FieldKind {
   schemaIndex.unionFor(classId)?.let { return FieldKind.Union(it) }
   return FieldKind.Unknown
 }
-
-private fun ResolvedNamedType.classId(): ClassId? =
-  runCatching { ClassId.topLevel(FqName(name)) }.getOrNull()

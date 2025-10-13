@@ -44,7 +44,7 @@ internal fun FlatbuffersFirDeclarationGenerator.stubFunction(
       this.modality = modality
       configure()
     }
-  function.replaceBody(todoBlock(owner.classId, name))
+  function.replaceBody(todoBlock("${owner.classId.asFqNameString()}.${name.asString()}"))
   return function
 }
 
@@ -68,8 +68,9 @@ internal fun FlatbuffersFirDeclarationGenerator.stubProperty(
     ) {
       configure()
     }
-  property.getter?.replaceBody(todoBlock(owner.classId, name))
-  property.setter?.replaceBody(todoBlock(owner.classId, name))
+  val target = "${owner.classId.asFqNameString()}.${name.asString()}"
+  property.getter?.replaceBody(todoBlock(target))
+  property.setter?.replaceBody(todoBlock(target))
   return property
 }
 
@@ -93,10 +94,7 @@ internal fun SimpleFunctionBuildingContext.valueParameter(
   )
 }
 
-private fun FlatbuffersFirDeclarationGenerator.todoBlock(
-  ownerClassId: ClassId,
-  callableName: Name,
-) =
+internal fun FlatbuffersFirDeclarationGenerator.todoBlock(target: String) =
   buildBlock {
     statements +=
       buildFunctionCall {
@@ -119,7 +117,7 @@ private fun FlatbuffersFirDeclarationGenerator.todoBlock(
               buildLiteralExpression(
                 source = null,
                 kind = ConstantValueKind.String,
-                value = "TODO(${ownerClassId.asFqNameString()}.${callableName.asString()})",
+                value = "TODO($target)",
                 setType = true,
               )
           }

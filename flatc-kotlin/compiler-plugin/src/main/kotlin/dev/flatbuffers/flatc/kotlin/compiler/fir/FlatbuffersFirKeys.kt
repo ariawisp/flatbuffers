@@ -50,4 +50,12 @@ internal object FlatbuffersFirKeys {
   data object EnumCompanionObject : GeneratedDeclarationKey() {
     override fun toString(): String = "FlatbuffersEnumCompanionObject"
   }
+
+  data object OffsetArrayTypeAlias : GeneratedDeclarationKey() {
+    override fun toString(): String = "FlatbuffersOffsetArrayTypeAlias"
+  }
+
+  data object OffsetArrayConstructorFunction : GeneratedDeclarationKey() {
+    override fun toString(): String = "FlatbuffersOffsetArrayConstructorFunction"
+  }
 }

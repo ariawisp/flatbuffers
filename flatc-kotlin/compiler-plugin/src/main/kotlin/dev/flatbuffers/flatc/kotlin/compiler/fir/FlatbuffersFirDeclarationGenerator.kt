@@ -1,6 +1,8 @@
 package dev.flatbuffers.flatc.kotlin.compiler.fir
 
 import dev.flatbuffers.flatc.kotlin.compat.CompatContext
+import dev.flatbuffers.flatc.kotlin.compiler.metadata.classId
+import dev.flatbuffers.flatc.kotlin.compiler.metadata.offsetArrayClassId
 import dev.flatbuffers.flatc.kotlin.compiler.options.FlatbuffersPluginOptions
 import dev.flatbuffers.flatc.kotlin.compiler.schema.SchemaIndex
 import dev.flatbuffers.ast.ScalarType
@@ -9,17 +11,27 @@ import dev.flatbuffers.semantics.ResolvedStruct
 import dev.flatbuffers.semantics.ResolvedTable
 import dev.flatbuffers.semantics.ResolvedUnion
 import org.jetbrains.kotlin.GeneratedDeclarationKey
+import org.jetbrains.kotlin.descriptors.EffectiveVisibility
+import org.jetbrains.kotlin.descriptors.Modality
+import org.jetbrains.kotlin.descriptors.Visibilities
 import org.jetbrains.kotlin.fir.FirSession
 import org.jetbrains.kotlin.fir.extensions.ExperimentalTopLevelDeclarationsGenerationApi
 import org.jetbrains.kotlin.fir.extensions.FirDeclarationGenerationExtension
 import org.jetbrains.kotlin.fir.extensions.DeclarationGenerationContext
 import org.jetbrains.kotlin.fir.extensions.NestedClassGenerationContext
+import org.jetbrains.kotlin.fir.declarations.FirResolvePhase
+import org.jetbrains.kotlin.fir.declarations.builder.buildTypeAlias
+import org.jetbrains.kotlin.fir.declarations.impl.FirResolvedDeclarationStatusImpl
+import org.jetbrains.kotlin.fir.declarations.origin
 import org.jetbrains.kotlin.fir.plugin.createTopLevelClass
 import org.jetbrains.kotlin.fir.plugin.createCompanionObject
+import org.jetbrains.kotlin.fir.moduleData
+import org.jetbrains.kotlin.fir.scopes.kotlinScopeProvider
 import org.jetbrains.kotlin.fir.symbols.impl.FirClassLikeSymbol
 import org.jetbrains.kotlin.fir.symbols.impl.FirClassSymbol
 import org.jetbrains.kotlin.fir.symbols.impl.FirNamedFunctionSymbol
 import org.jetbrains.kotlin.fir.symbols.impl.FirPropertySymbol
+import org.jetbrains.kotlin.fir.symbols.impl.FirTypeAliasSymbol
 import org.jetbrains.kotlin.fir.resolve.defaultType
 import org.jetbrains.kotlin.fir.toFirResolvedTypeRef
 import org.jetbrains.kotlin.fir.types.ConeKotlinType
@@ -36,7 +48,7 @@ internal class FlatbuffersFirDeclarationGenerator(
   session: FirSession,
   private val schemaIndex: SchemaIndex,
   @Suppress("UNUSED_PARAMETER") private val options: FlatbuffersPluginOptions,
-  @Suppress("UNUSED_PARAMETER") private val compatContext: CompatContext,
+  private val compatContext: CompatContext,
 ) : FirDeclarationGenerationExtension(session) {
 
   private val tableClassId = ClassId(FqName("com.google.flatbuffers.kotlin"), Name.identifier("Table"))
@@ -72,6 +84,8 @@ internal class FlatbuffersFirDeclarationGenerator(
   private val tablePropertyCache = mutableMapOf<ClassId, Map<Name, PropertySpec>>()
   private val tableFunctionCache = mutableMapOf<ClassId, Map<Name, List<FunctionSpec>>>()
   private val tableCompanionFunctionCache = mutableMapOf<ClassId, Map<Name, List<FunctionSpec>>>()
+  private val offsetArraySpecsByAliasId: Map<ClassId, OffsetArraySpec>
+  private val offsetArraySpecsByCallableId: Map<CallableId, OffsetArraySpec>
 
   private data class ParameterSpec(
     val name: String,
@@ -86,6 +100,7 @@ internal class FlatbuffersFirDeclarationGenerator(
     val returnType: ConeKotlinType,
     val parameters: List<ParameterSpec>,
     val key: GeneratedDeclarationKey,
+    val requiredFields: List<TableFieldModel> = emptyList(),
   )
 
   private data class PropertySpec(
@@ -93,6 +108,16 @@ internal class FlatbuffersFirDeclarationGenerator(
     val returnType: ConeKotlinType,
     val key: GeneratedDeclarationKey,
     val isMutable: Boolean = false,
+  )
+
+  private data class OffsetArraySpec(
+    val aliasClassId: ClassId,
+    val elementClassId: ClassId,
+    val expandedType: ConeKotlinType,
+    val aliasType: ConeKotlinType,
+    val lambdaReturnType: ConeKotlinType,
+    val functionParameterType: ConeKotlinType,
+    val callableId: CallableId,
   )
 
   init {
@@ -117,6 +142,17 @@ internal class FlatbuffersFirDeclarationGenerator(
     rootTableClassIds = schemaIndex.rootTables.mapTo(linkedSetOf()) { it.classId() }
     tableKeyFieldByClassId = tableFieldsByClassId.mapValues { (_, fields) -> fields.firstOrNull { it.isKey } }
     tableRequiredFieldsByClassId = tableFieldsByClassId.mapValues { (_, fields) -> fields.filter(TableFieldModel::isRequired) }
+    val offsetSpecs = linkedMapOf<ClassId, OffsetArraySpec>()
+    tablesByClassId.keys.forEach { classId ->
+      val spec = createOffsetArraySpec(classId)
+      offsetSpecs.putIfAbsent(spec.aliasClassId, spec)
+    }
+    structsByClassId.keys.forEach { classId ->
+      val spec = createOffsetArraySpec(classId)
+      offsetSpecs.putIfAbsent(spec.aliasClassId, spec)
+    }
+    offsetArraySpecsByAliasId = offsetSpecs
+    offsetArraySpecsByCallableId = offsetSpecs.values.associateBy { it.callableId }
   }
 
   @ExperimentalTopLevelDeclarationsGenerationApi
@@ -125,7 +161,12 @@ internal class FlatbuffersFirDeclarationGenerator(
       addAll(tablesByClassId.keys)
       addAll(structsByClassId.keys)
       addAll(enumsByClassId.keys)
+      addAll(offsetArraySpecsByAliasId.keys)
     }
+
+  @ExperimentalTopLevelDeclarationsGenerationApi
+  override fun getTopLevelCallableIds(): Set<CallableId> =
+    offsetArraySpecsByCallableId.keys
 
   private val companionName = Name.identifier("Companion")
   private val initName = Name.identifier("init")
@@ -138,6 +179,7 @@ internal class FlatbuffersFirDeclarationGenerator(
     tablesByClassId[classId]?.let { return generateTableClass(classId) }
     structsByClassId[classId]?.let { return generateStructClass(classId) }
     enumsByClassId[classId]?.let { return generateEnumClass(classId) }
+    offsetArraySpecsByAliasId[classId]?.let { return generateOffsetArrayTypeAlias(it) }
     return null
   }
 
@@ -221,7 +263,13 @@ internal class FlatbuffersFirDeclarationGenerator(
     callableId: CallableId,
     context: DeclarationGenerationContext.Member?,
   ): List<FirNamedFunctionSymbol> {
-    val owner = context?.owner ?: return emptyList()
+    if (context == null) {
+      offsetArraySpecsByCallableId[callableId]?.let { spec ->
+        return listOf(generateOffsetArrayConstructorFunction(callableId, spec))
+      }
+      return emptyList()
+    }
+    val owner = context.owner
     val classId = owner.classId
     tablesByClassId[classId]?.let { table ->
       return generateTableFunction(owner, table, callableId)
@@ -279,10 +327,75 @@ internal class FlatbuffersFirDeclarationGenerator(
     return createTopLevelClass(classId, FlatbuffersFirKeys.EnumClass).symbol
   }
 
-  private fun ResolvedTable.classId(): ClassId = classIdFrom(namespace, name)
-  private fun ResolvedStruct.classId(): ClassId = classIdFrom(namespace, name)
-  private fun ResolvedEnum.classId(): ClassId = classIdFrom(namespace, name)
-  private fun ResolvedUnion.classId(): ClassId = classIdFrom(namespace, name)
+  private fun generateOffsetArrayTypeAlias(spec: OffsetArraySpec): FirClassLikeSymbol<*> {
+    val typeAlias =
+      buildTypeAlias {
+        resolvePhase = FirResolvePhase.BODY_RESOLVE
+        moduleData = session.moduleData
+        origin = FlatbuffersFirKeys.OffsetArrayTypeAlias.origin
+        scopeProvider = session.kotlinScopeProvider
+        status = FirResolvedDeclarationStatusImpl(Visibilities.Public, Modality.FINAL, EffectiveVisibility.Public)
+        name = spec.aliasClassId.shortClassName
+        symbol = FirTypeAliasSymbol(spec.aliasClassId)
+        expandedTypeRef = spec.expandedType.toFirResolvedTypeRef()
+      }
+    return typeAlias.symbol
+  }
+
+  @OptIn(ExperimentalTopLevelDeclarationsGenerationApi::class)
+  private fun generateOffsetArrayConstructorFunction(
+    callableId: CallableId,
+    spec: OffsetArraySpec,
+  ): FirNamedFunctionSymbol {
+    val function =
+      compatContext.run {
+        createTopLevelFunction(
+          key = FlatbuffersFirKeys.OffsetArrayConstructorFunction,
+          callableId = callableId,
+          returnType = spec.aliasType,
+        ) {
+          status {
+            isInline = true
+          }
+          valueParameter(
+            name = "size",
+            type = StandardClassIds.Int.toType(),
+            key = FlatbuffersFirKeys.OffsetArrayConstructorFunction,
+          )
+          valueParameter(
+            name = "call",
+            type = spec.functionParameterType,
+            key = FlatbuffersFirKeys.OffsetArrayConstructorFunction,
+            isCrossinline = true,
+          )
+        }
+      }
+    function.replaceBody(todoBlock(callableId.toString()))
+    return function.symbol
+  }
+
+  private fun createOffsetArraySpec(elementClassId: ClassId): OffsetArraySpec {
+    val aliasClassId = elementClassId.offsetArrayClassId()
+    val elementType = elementClassId.toType()
+    val expandedType = offsetArrayClassId.toType(elementType)
+    val aliasType = aliasClassId.toType()
+    val lambdaReturnType = offsetClassId.toType(elementType)
+    val functionParameterType =
+      StandardClassIds.FunctionN(1).toType(
+        StandardClassIds.Int.toType(),
+        lambdaReturnType,
+      )
+    val callableId = CallableId(aliasClassId.packageFqName, aliasClassId.shortClassName)
+    return OffsetArraySpec(
+      aliasClassId = aliasClassId,
+      elementClassId = elementClassId,
+      expandedType = expandedType,
+      aliasType = aliasType,
+      lambdaReturnType = lambdaReturnType,
+      functionParameterType = functionParameterType,
+      callableId = callableId,
+    )
+  }
 
   private fun generateTableFunction(
     owner: FirClassSymbol<*>,
@@ -339,12 +452,6 @@ internal class FlatbuffersFirDeclarationGenerator(
       startName ->
         listOf(
           stubFunction(owner, FlatbuffersFirKeys.TableCompanionFunction, startName, StandardClassIds.Unit.toType()) {
-            valueParameter("builder", flatBufferBuilderType, FlatbuffersFirKeys.TableCompanionFunction)
-          }.symbol
-        )
-      endName ->
-        listOf(
-          stubFunction(owner, FlatbuffersFirKeys.TableCompanionFunction, endName, offsetClassId.toType(tableType)) {
             valueParameter("builder", flatBufferBuilderType, FlatbuffersFirKeys.TableCompanionFunction)
           }.symbol
         )
@@ -437,7 +544,7 @@ internal class FlatbuffersFirDeclarationGenerator(
           when (val kind = field.kind) {
             is FieldKind.Scalar -> putIfAbsent(field.name, PropertySpec(field.name, scalarType(kind.scalar), FlatbuffersFirKeys.TableProperty))
             FieldKind.StringType -> {
-              val type = StandardClassIds.String.toType(nullable = !field.isRequired())
+              val type = StandardClassIds.String.toType(nullable = !field.isRequired)
               putIfAbsent(field.name, PropertySpec(field.name, type, FlatbuffersFirKeys.TableProperty))
             }
             is FieldKind.Struct -> {
@@ -601,6 +708,17 @@ internal class FlatbuffersFirDeclarationGenerator(
           addCompanionVectorFunctions(result, field)
         }
       }
+      val endBuilderParam = builderParameter()
+      val requiredFields = tableRequiredFieldsByClassId[table.classId()].orEmpty()
+      result.addFunction(
+        FunctionSpec(
+          name = endFunctionName(table),
+          returnType = offsetClassId.toType(tableConeType),
+          parameters = listOf(endBuilderParam),
+          key = FlatbuffersFirKeys.TableCompanionFunction,
+          requiredFields = requiredFields,
+        )
+      )
 
       tableKeyParameterType(table)?.let { keyType ->
         val objParam =
@@ -670,14 +788,11 @@ internal class FlatbuffersFirDeclarationGenerator(
   private fun TableFieldModel.propertyType(): ConeKotlinType? =
     when (val kind = kind) {
       is FieldKind.Scalar -> scalarType(kind.scalar)
-      FieldKind.StringType -> StandardClassIds.String.toType(nullable = !isRequired())
+      FieldKind.StringType -> StandardClassIds.String.toType(nullable = !isRequired)
       is FieldKind.Struct -> kind.struct.classId().toType(nullable = true)
       is FieldKind.Table -> kind.table.classId().toType(nullable = true)
       else -> null
     }
-
-  private fun TableFieldModel.isRequired(): Boolean =
-    field.attributes.any { it.name.equals("required", ignoreCase = true) }
 
   private fun addVectorFunctionSpecs(
     accumulator: MutableMap<Name, MutableList<FunctionSpec>>,
@@ -857,6 +972,9 @@ internal class FlatbuffersFirDeclarationGenerator(
     }
   }
 
+  private fun ClassId.offsetArrayClassId(): ClassId =
+    ClassId(packageFqName, shortClassName.withSuffix("OffsetArray"))
+
   private fun finishFunctionName(table: ResolvedTable): Name =
     Name.identifier("finish${table.name.capitalizeAscii()}Buffer")
 
@@ -903,9 +1021,4 @@ internal class FlatbuffersFirDeclarationGenerator(
   private fun Name.asBufferName(): Name = Name.identifier("${asString()}AsBuffer")
   private fun Name.typeName(): Name = Name.identifier("${asString()}Type")
   private fun Name.withSuffix(suffix: String): Name = Name.identifier("${asString()}$suffix")
-
-  private fun classIdFrom(namespace: String?, simpleName: String): ClassId {
-    val packageFqName = namespace?.takeIf { it.isNotBlank() }?.let(::FqName) ?: FqName.ROOT
-    return ClassId(packageFqName, Name.identifier(simpleName))
-  }
 }
