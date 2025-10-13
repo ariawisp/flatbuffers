@@ -90,6 +90,7 @@ project(":compiler-plugin") {
     add("testImplementation", "org.junit.jupiter:junit-jupiter-api:5.10.2")
     add("testRuntimeOnly", "org.junit.jupiter:junit-jupiter-engine:5.10.2")
     add("testRuntimeOnly", "org.junit.platform:junit-platform-launcher:1.10.2")
+    add("testImplementation", "com.github.tschuchortdev:kotlin-compile-testing:1.5.0")
   }
 
 }

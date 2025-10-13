@@ -31,6 +31,7 @@ import org.jetbrains.kotlin.ir.declarations.IrParameterKind
 import org.jetbrains.kotlin.ir.declarations.IrProperty
 import org.jetbrains.kotlin.ir.declarations.IrSimpleFunction
 import org.jetbrains.kotlin.ir.declarations.IrValueParameter
+import org.jetbrains.kotlin.ir.expressions.IrCall
 import org.jetbrains.kotlin.ir.expressions.IrExpression
 import org.jetbrains.kotlin.ir.expressions.impl.IrConstImpl
 import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
@@ -38,6 +39,7 @@ import org.jetbrains.kotlin.ir.symbols.UnsafeDuringIrConstructionAPI
 import org.jetbrains.kotlin.ir.types.IrType
 import org.jetbrains.kotlin.ir.util.classId
 import org.jetbrains.kotlin.ir.util.defaultType
+import org.jetbrains.kotlin.ir.util.render
 import org.jetbrains.kotlin.ir.visitors.IrElementTransformerVoid
 import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 import org.jetbrains.kotlin.name.ClassId
@@ -124,14 +126,14 @@ internal class TableBodyLowering(
       DeclarationIrBuilder(context.pluginContext, function.symbol, function.startOffset, function.endOffset)
     function.body =
       builder.irBlockBody {
-        +irReturn(
+        val call =
           irCall(symbols.tableReset).apply {
             dispatchReceiver = irGet(receiver)
-            putTypeArgument(0, tableType)
-            putValueArgument(0, irGet(parameters[0]))
-            putValueArgument(1, irGet(parameters[1]))
+            typeArguments[0] = tableType
+            setRegularValueArgument(0, irGet(parameters[0]))
+            setRegularValueArgument(1, irGet(parameters[1]))
           }
-        )
+        +irReturn(call)
       }
   }
 
@@ -148,32 +150,34 @@ internal class TableBodyLowering(
     val receiver = getter.dispatchReceiverParameter ?: return
     val builder =
       DeclarationIrBuilder(context.pluginContext, getter.symbol, getter.startOffset, getter.endOffset)
+    val runtimeSymbols = symbols
+    val runtimeContextSymbols = context.symbols
     getter.body =
       builder.irBlockBody {
         val condition =
           irEquals(
-            irCall(this@TableBodyLowering.symbols.tableOffset).apply {
+            irCall(runtimeSymbols.tableOffset).apply {
               dispatchReceiver = irGet(receiver)
-              putValueArgument(0, irInt(vtableOffsetFor(fieldInfo.index)))
+              setRegularValueArgument(0, irInt(vtableOffsetFor(fieldInfo.index)))
             },
             irInt(0),
           )
         val readExpr =
-          irCall(this@TableBodyLowering.context.symbols.readWriteBufferGetterFor(fieldInfo.scalarType)).apply {
+          irCall(runtimeContextSymbols.readWriteBufferGetterFor(fieldInfo.scalarType)).apply {
             dispatchReceiver =
-              irCall(this@TableBodyLowering.symbols.tableBufferGetter).apply {
+              irCall(runtimeSymbols.tableBufferGetter).apply {
                 dispatchReceiver = irGet(receiver)
               }
             val offsetExpr =
-              irCall(this@TableBodyLowering.symbols.tableOffset).apply {
+              irCall(runtimeSymbols.tableOffset).apply {
                 dispatchReceiver = irGet(receiver)
-                putValueArgument(0, irInt(vtableOffsetFor(fieldInfo.index)))
+                setRegularValueArgument(0, irInt(vtableOffsetFor(fieldInfo.index)))
               }
             val bufferPosExpr =
-              irCall(this@TableBodyLowering.symbols.tableBufferPosGetter).apply {
+              irCall(runtimeSymbols.tableBufferPosGetter).apply {
                 dispatchReceiver = irGet(receiver)
               }
-            putValueArgument(0, addInts(offsetExpr, bufferPosExpr))
+            setRegularValueArgument(0, addInts(offsetExpr, bufferPosExpr))
           }
         +irReturn(
           irIfThenElse(
@@ -204,9 +208,9 @@ internal class TableBodyLowering(
       builder.irBlockBody {
         +irCall(symbols.flatBufferBuilderAddFor(fieldInfo.scalarType)).apply {
           dispatchReceiver = irGet(parameters[0])
-          putValueArgument(0, irInt(fieldInfo.index))
-          putValueArgument(1, irGet(parameters[1]))
-          putValueArgument(2, scalarDefaultExpression(fieldInfo.scalarType, fieldInfo.field))
+          setRegularValueArgument(0, irInt(fieldInfo.index))
+          setRegularValueArgument(1, irGet(parameters[1]))
+          setRegularValueArgument(2, scalarDefaultExpression(fieldInfo.scalarType, fieldInfo.field))
         }
         +irReturn(irUnit())
       }
@@ -288,3 +292,14 @@ private fun IrSimpleFunction.regularValueParameters(): List<IrValueParameter> =
   parameters.filter { parameter ->
     parameter.kind == IrParameterKind.Regular || parameter.kind == IrParameterKind.Context
   }
+
+@OptIn(UnsafeDuringIrConstructionAPI::class)
+private fun IrCall.setRegularValueArgument(index: Int, expression: IrExpression) {
+  val parameterList =
+    this.symbol.owner.parameters.filter { parameter ->
+      parameter.kind == IrParameterKind.Regular || parameter.kind == IrParameterKind.Context
+    }
+  val parameter = parameterList.getOrNull(index)
+    ?: error("No regular parameter at index $index for ${this.symbol.owner.render()}")
+  this.arguments[parameter.indexInParameters] = expression
+}
