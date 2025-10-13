@@ -22,6 +22,7 @@ internal data class TableFieldModel(
   val name: Name,
   val field: ResolvedField,
   val kind: FieldKind,
+  val isKey: Boolean,
 )
 
 internal sealed interface FieldKind {
@@ -42,6 +43,7 @@ internal fun ResolvedTable.toFieldModels(schemaIndex: SchemaIndex): List<TableFi
       name = Name.identifier(field.name),
       field = field,
       kind = field.type.toFieldKind(schemaIndex),
+      isKey = attributes.any { attr -> attr.name == "key" || attr.fullName == "key" },
     )
   }
 
@@ -52,6 +54,7 @@ internal fun ResolvedStruct.toFieldModels(schemaIndex: SchemaIndex): List<TableF
       name = Name.identifier(field.name),
       field = field,
       kind = field.type.toFieldKind(schemaIndex),
+      isKey = false,
     )
   }
 

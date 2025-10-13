@@ -67,6 +67,8 @@ internal class FlatbuffersFirDeclarationGenerator(
   private val structFieldsByClassId: Map<ClassId, List<TableFieldModel>>
   private val tableFieldsByClassId: Map<ClassId, List<TableFieldModel>>
   private val rootTableClassIds: Set<ClassId>
+  private val tableKeyFieldByClassId: Map<ClassId, TableFieldModel?>
+  private val tableRequiredFieldsByClassId: Map<ClassId, List<TableFieldModel>>
   private val tablePropertyCache = mutableMapOf<ClassId, Map<Name, PropertySpec>>()
   private val tableFunctionCache = mutableMapOf<ClassId, Map<Name, List<FunctionSpec>>>()
   private val tableCompanionFunctionCache = mutableMapOf<ClassId, Map<Name, List<FunctionSpec>>>()
@@ -113,6 +115,8 @@ internal class FlatbuffersFirDeclarationGenerator(
     structFieldsByClassId = structMap.mapValues { (_, struct) -> struct.toFieldModels(schemaIndex) }
     tableFieldsByClassId = tableMap.mapValues { (_, table) -> table.toFieldModels(schemaIndex) }
     rootTableClassIds = schemaIndex.rootTables.mapTo(linkedSetOf()) { it.classId() }
+    tableKeyFieldByClassId = tableFieldsByClassId.mapValues { (_, fields) -> fields.firstOrNull { it.isKey } }
+    tableRequiredFieldsByClassId = tableFieldsByClassId.mapValues { (_, fields) -> fields.filter(TableFieldModel::isRequired) }
   }
 
   @ExperimentalTopLevelDeclarationsGenerationApi
@@ -510,6 +514,37 @@ internal class FlatbuffersFirDeclarationGenerator(
                   ),
                 key = FlatbuffersFirKeys.TableMemberFunction,
               )
+            tableKeyParameterType(kind.table)?.let { keyType ->
+              val keyParam =
+                ParameterSpec(
+                  name = "key",
+                  type = keyType,
+                  key = FlatbuffersFirKeys.TableMemberFunction,
+                )
+              accumulator.addFunction(
+                FunctionSpec(
+                  name = field.name.withSuffix("ByKey"),
+                  returnType = referencedType,
+                  parameters = listOf(keyParam),
+                  key = FlatbuffersFirKeys.TableMemberFunction,
+                )
+              )
+              accumulator.addFunction(
+                FunctionSpec(
+                  name = field.name.withSuffix("ByKey"),
+                  returnType = referencedType,
+                  parameters = listOf(
+                    ParameterSpec(
+                      name = "obj",
+                      type = parameterType,
+                      key = FlatbuffersFirKeys.TableMemberFunction,
+                    ),
+                    keyParam,
+                  ),
+                  key = FlatbuffersFirKeys.TableMemberFunction,
+                )
+              )
+            }
           }
           is FieldKind.Union -> {
             val unionFunctionName = field.name
@@ -539,6 +574,8 @@ internal class FlatbuffersFirDeclarationGenerator(
   private fun tableCompanionFunctionSpecs(table: ResolvedTable): Map<Name, List<FunctionSpec>> =
     tableCompanionFunctionCache.getOrPut(table.classId()) {
       val unitType = StandardClassIds.Unit.toType()
+      val tableConeType = table.classId().toType()
+      val nullableTableType = table.classId().toType(nullable = true)
       val result = linkedMapOf<Name, MutableList<FunctionSpec>>()
 
       tableFieldsByClassId[table.classId()].orEmpty().forEach { field ->
@@ -563,6 +600,41 @@ internal class FlatbuffersFirDeclarationGenerator(
         if (field.kind is FieldKind.Vector) {
           addCompanionVectorFunctions(result, field)
         }
+      }
+
+      tableKeyParameterType(table)?.let { keyType ->
+        val objParam =
+          ParameterSpec(
+            name = "obj",
+            type = nullableTableType,
+            key = FlatbuffersFirKeys.TableCompanionFunction,
+          )
+        val vectorLocationParam =
+          ParameterSpec(
+            name = "vectorLocation",
+            type = StandardClassIds.Int.toType(),
+            key = FlatbuffersFirKeys.TableCompanionFunction,
+          )
+        val keyParam =
+          ParameterSpec(
+            name = "key",
+            type = keyType,
+            key = FlatbuffersFirKeys.TableCompanionFunction,
+          )
+        val bufferParam =
+          ParameterSpec(
+            name = "bb",
+            type = readWriteBufferType,
+            key = FlatbuffersFirKeys.TableCompanionFunction,
+          )
+        result.addFunction(
+          FunctionSpec(
+            name = Name.identifier("lookupByKey"),
+            returnType = nullableTableType,
+            parameters = listOf(objParam, vectorLocationParam, keyParam, bufferParam),
+            key = FlatbuffersFirKeys.TableCompanionFunction,
+          )
+        )
       }
 
       if (table.classId() in rootTableClassIds) {
@@ -776,6 +848,15 @@ internal class FlatbuffersFirDeclarationGenerator(
       ScalarType.DOUBLE -> StandardClassIds.Double
     }
 
+  private fun tableKeyParameterType(table: ResolvedTable): ConeKotlinType? {
+    val keyField = tableKeyFieldByClassId[table.classId()] ?: return null
+    return when (val kind = keyField.kind) {
+      is FieldKind.Scalar -> scalarType(kind.scalar)
+      FieldKind.StringType -> StandardClassIds.String.toType()
+      else -> keyField.propertyType()
+    }
+  }
+
   private fun finishFunctionName(table: ResolvedTable): Name =
     Name.identifier("finish${table.name.capitalizeAscii()}Buffer")
 
@@ -821,6 +902,7 @@ internal class FlatbuffersFirDeclarationGenerator(
   private fun Name.lengthName(): Name = Name.identifier("${asString()}Length")
   private fun Name.asBufferName(): Name = Name.identifier("${asString()}AsBuffer")
   private fun Name.typeName(): Name = Name.identifier("${asString()}Type")
+  private fun Name.withSuffix(suffix: String): Name = Name.identifier("${asString()}$suffix")
 
   private fun classIdFrom(namespace: String?, simpleName: String): ClassId {
     val packageFqName = namespace?.takeIf { it.isNotBlank() }?.let(::FqName) ?: FqName.ROOT
