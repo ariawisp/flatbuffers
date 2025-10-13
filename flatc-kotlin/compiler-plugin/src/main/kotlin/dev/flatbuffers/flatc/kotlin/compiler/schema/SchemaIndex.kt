@@ -25,6 +25,8 @@ internal class SchemaIndex private constructor(
 ) {
   val schemas: List<ResolvedSchema> get() = loaded.map { it.analysis.schema }
 
+  val provenanceStore = SchemaProvenanceStore()
+
   fun declarationFor(name: String): ResolvedDeclaration? = declarationMap[name]
 
   fun declarationFor(classId: ClassId): ResolvedDeclaration? =

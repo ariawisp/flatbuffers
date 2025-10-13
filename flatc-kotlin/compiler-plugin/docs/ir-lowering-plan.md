@@ -26,8 +26,25 @@ lifting to the runtime in `com.google.flatbuffers.kotlin`.
      `GeneratedDeclarationKey`.
    - For each declaration kind (table class, struct class, enum companion, etc.) delegate to
      specialized populator.
+   - `SchemaProvenanceIrTransformer` applies schema-derived sources and docstrings recorded during
+     FIR stub generation so IR nodes retain provenance all the way to emission.
 3. Helpers to translate `Resolved...` models into IR (factory functions to construct constants,
    loops, etc.).
+
+## Source & Documentation Propagation
+
+- FIR generation records per-declaration spans and schema doc comments in `SchemaProvenanceStore`.
+- IR attaches matching `FlatbuffersSchemaMetadata` on each generated declaration, copies offsets
+  from schema files via `SchemaSourceIndex`, and leaves helpers without spans on synthetic sources.
+- `FlatbuffersSchemaMetadata` re-materialises schema docs into Kotlin KDoc form via
+  `DocCommentMaterializer`, making the text ready for renderers and metadata exporters.
+- TODO:
+  - Thread the rendered doc comment into any Kotlin source emitters or metadata serializers we
+    maintain.
+  - Add regression coverage that inspects metadata/offsets on representative tables, structs,
+    enums, and builder helpers.
+  - Evaluate whether type aliases, property accessors, and runtime helper bridges need additional
+    provenance or bespoke fake-source handling.
 
 ## Body Recipes
 

@@ -376,6 +376,7 @@ internal class FlatbuffersFirDeclarationGenerator(
         replaceSuperTypeRefs(superTypeRefs + tableType.toFirResolvedTypeRef())
       }
     klass.attachSchemaMetadata(schemaDoc)
+    schemaIndex.provenanceStore.recordClass(classId, table.span, table.docComment)
     return klass.symbol
   }
 
@@ -390,6 +391,7 @@ internal class FlatbuffersFirDeclarationGenerator(
         replaceSuperTypeRefs(superTypeRefs + structType.toFirResolvedTypeRef())
       }
     klass.attachSchemaMetadata(schemaDoc)
+    schemaIndex.provenanceStore.recordClass(classId, struct.span, struct.docComment)
     return klass.symbol
   }
 
@@ -406,6 +408,7 @@ internal class FlatbuffersFirDeclarationGenerator(
         }
       }
     klass.attachSchemaMetadata(schemaDoc)
+    schemaIndex.provenanceStore.recordClass(classId, enum.span, enum.docComment)
     return klass.symbol
   }
 
@@ -639,6 +642,9 @@ internal class FlatbuffersFirDeclarationGenerator(
           )
         }
       }
+    function.symbol.callableId?.let { callableId ->
+      schemaIndex.provenanceStore.recordFunction(callableId, spec.span, spec.docComment)
+    }
     return function.symbol
   }
 
@@ -656,6 +662,9 @@ internal class FlatbuffersFirDeclarationGenerator(
         span = spec.span,
         docComment = spec.docComment,
       )
+    property.symbol.callableId?.let { callableId ->
+      schemaIndex.provenanceStore.recordProperty(callableId, spec.span, spec.docComment)
+    }
     return property.symbol
   }
 

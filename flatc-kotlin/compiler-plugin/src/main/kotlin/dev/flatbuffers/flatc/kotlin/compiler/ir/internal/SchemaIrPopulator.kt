@@ -8,6 +8,9 @@ internal class SchemaIrPopulator(
 ) {
   fun populate(moduleFragment: IrModuleFragment) {
     moduleFragment.transformChildrenVoid(
+      SchemaProvenanceIrTransformer(context),
+    )
+    moduleFragment.transformChildrenVoid(
       TableCompanionEndLowering(context),
     )
   }
