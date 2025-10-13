@@ -129,6 +129,7 @@ project(":compiler-plugin") {
     add("testRuntimeOnly", "com.jetbrains.intellij.java:java-psi:$intellijVersion")
     add("testRuntimeOnly", "com.jetbrains.intellij.java:java-psi-impl:$intellijVersion")
     flatbuffersCompilerPluginRuntime(project(":compat"))
+    flatbuffersCompilerPluginRuntime(project(":flatbuffers-runtime"))
   }
 
   val pluginJarProvider = tasks.named<Jar>("jar").flatMap { it.archiveFile }
