@@ -6,7 +6,9 @@ import dev.flatbuffers.flatc.kotlin.compiler.metadata.enumArrayClassId
 import dev.flatbuffers.flatc.kotlin.compiler.metadata.offsetArrayClassId
 import dev.flatbuffers.flatc.kotlin.compiler.options.FlatbuffersPluginOptions
 import dev.flatbuffers.flatc.kotlin.compiler.schema.SchemaIndex
+import dev.flatbuffers.ast.DocComment
 import dev.flatbuffers.ast.ScalarType
+import dev.flatbuffers.ast.SourceSpan
 import dev.flatbuffers.semantics.ResolvedEnum
 import dev.flatbuffers.semantics.ResolvedStruct
 import dev.flatbuffers.semantics.ResolvedTable
@@ -109,6 +111,8 @@ internal class FlatbuffersFirDeclarationGenerator(
     val returnType: ConeKotlinType,
     val parameters: List<ParameterSpec>,
     val key: GeneratedDeclarationKey,
+    val span: SourceSpan? = null,
+    val docComment: DocComment? = null,
     val requiredFields: List<TableFieldModel> = emptyList(),
   )
 
@@ -116,6 +120,8 @@ internal class FlatbuffersFirDeclarationGenerator(
     val name: Name,
     val returnType: ConeKotlinType,
     val key: GeneratedDeclarationKey,
+    val span: SourceSpan? = null,
+    val docComment: DocComment? = null,
     val isMutable: Boolean = false,
   )
 
@@ -629,28 +635,34 @@ internal class FlatbuffersFirDeclarationGenerator(
       val fields = tableFieldsByClassId[table.classId()].orEmpty()
       buildMap {
         fields.forEach { field ->
+          val span = field.field.span
+          val doc = field.field.docComment
           when (val kind = field.kind) {
-            is FieldKind.Scalar -> putIfAbsent(field.name, PropertySpec(field.name, scalarType(kind.scalar), FlatbuffersFirKeys.TableProperty))
+            is FieldKind.Scalar ->
+              putIfAbsent(
+                field.name,
+                PropertySpec(field.name, scalarType(kind.scalar), FlatbuffersFirKeys.TableProperty, span = span, docComment = doc),
+              )
             FieldKind.StringType -> {
               val type = StandardClassIds.String.toType(nullable = !field.isRequired)
-              putIfAbsent(field.name, PropertySpec(field.name, type, FlatbuffersFirKeys.TableProperty))
+              putIfAbsent(field.name, PropertySpec(field.name, type, FlatbuffersFirKeys.TableProperty, span = span, docComment = doc))
             }
             is FieldKind.Struct -> {
               val structType = kind.struct.classId().toType(nullable = true)
-              putIfAbsent(field.name, PropertySpec(field.name, structType, FlatbuffersFirKeys.TableProperty))
+              putIfAbsent(field.name, PropertySpec(field.name, structType, FlatbuffersFirKeys.TableProperty, span = span, docComment = doc))
             }
             is FieldKind.Table -> {
               val referencedType = kind.table.classId().toType(nullable = true)
-              putIfAbsent(field.name, PropertySpec(field.name, referencedType, FlatbuffersFirKeys.TableProperty))
+              putIfAbsent(field.name, PropertySpec(field.name, referencedType, FlatbuffersFirKeys.TableProperty, span = span, docComment = doc))
             }
             is FieldKind.Union -> {
               val typePropertyName = Name.identifier("${field.name.asString()}Type")
               val unionType = kind.union.classId().toType()
-              putIfAbsent(typePropertyName, PropertySpec(typePropertyName, unionType, FlatbuffersFirKeys.TableProperty))
+              putIfAbsent(typePropertyName, PropertySpec(typePropertyName, unionType, FlatbuffersFirKeys.TableProperty, span = span, docComment = doc))
             }
             is FieldKind.Vector -> {
               val lengthName = field.name.lengthName()
-              putIfAbsent(lengthName, PropertySpec(lengthName, StandardClassIds.Int.toType(), FlatbuffersFirKeys.TableProperty))
+              putIfAbsent(lengthName, PropertySpec(lengthName, StandardClassIds.Int.toType(), FlatbuffersFirKeys.TableProperty, span = span, docComment = doc))
             }
             else -> Unit
           }
@@ -663,6 +675,8 @@ internal class FlatbuffersFirDeclarationGenerator(
       val fields = tableFieldsByClassId[table.classId()].orEmpty()
       val accumulator = linkedMapOf<Name, MutableList<FunctionSpec>>()
       fields.forEach { field ->
+        val span = field.field.span
+        val doc = field.field.docComment
         when (val kind = field.kind) {
           FieldKind.StringType -> {
             val name = Name.identifier("${field.name.asString()}AsBuffer")
@@ -672,6 +686,8 @@ internal class FlatbuffersFirDeclarationGenerator(
                 returnType = readBufferType,
                 parameters = emptyList(),
                 key = FlatbuffersFirKeys.TableMemberFunction,
+                span = span,
+                docComment = doc,
               )
           }
           is FieldKind.Struct -> {
@@ -690,6 +706,8 @@ internal class FlatbuffersFirDeclarationGenerator(
                     ),
                   ),
                 key = FlatbuffersFirKeys.TableMemberFunction,
+                span = span,
+                docComment = doc,
               )
           }
           is FieldKind.Table -> {
@@ -708,6 +726,8 @@ internal class FlatbuffersFirDeclarationGenerator(
                     ),
                   ),
                 key = FlatbuffersFirKeys.TableMemberFunction,
+                span = span,
+                docComment = doc,
               )
             tableKeyParameterType(kind.table)?.let { keyType ->
               val keyParam =
@@ -722,6 +742,8 @@ internal class FlatbuffersFirDeclarationGenerator(
                   returnType = referencedType,
                   parameters = listOf(keyParam),
                   key = FlatbuffersFirKeys.TableMemberFunction,
+                  span = span,
+                  docComment = doc,
                 )
               )
               accumulator.addFunction(
@@ -737,6 +759,8 @@ internal class FlatbuffersFirDeclarationGenerator(
                     keyParam,
                   ),
                   key = FlatbuffersFirKeys.TableMemberFunction,
+                  span = span,
+                  docComment = doc,
                 )
               )
             }
@@ -757,6 +781,8 @@ internal class FlatbuffersFirDeclarationGenerator(
                     ),
                   ),
                 key = FlatbuffersFirKeys.TableMemberFunction,
+                span = span,
+                docComment = doc,
               )
           }
           is FieldKind.Vector -> addVectorFunctionSpecs(accumulator, field, kind.elementKind)
@@ -771,15 +797,17 @@ internal class FlatbuffersFirDeclarationGenerator(
       val fields = structFieldsByClassId[struct.classId()].orEmpty()
       buildMap {
         fields.forEach { field ->
+          val span = field.field.span
+          val doc = field.field.docComment
           when (val kind = field.kind) {
             is FieldKind.Scalar ->
               putIfAbsent(
                 field.name,
-                PropertySpec(field.name, scalarType(kind.scalar), FlatbuffersFirKeys.StructProperty),
+                PropertySpec(field.name, scalarType(kind.scalar), FlatbuffersFirKeys.StructProperty, span = span, docComment = doc),
               )
             is FieldKind.Struct -> {
               val structType = kind.struct.classId().toType(nullable = true)
-              putIfAbsent(field.name, PropertySpec(field.name, structType, FlatbuffersFirKeys.StructProperty))
+              putIfAbsent(field.name, PropertySpec(field.name, structType, FlatbuffersFirKeys.StructProperty, span = span, docComment = doc))
             }
             else -> Unit
           }
@@ -792,6 +820,8 @@ internal class FlatbuffersFirDeclarationGenerator(
       val fields = structFieldsByClassId[struct.classId()].orEmpty()
       val accumulator = linkedMapOf<Name, MutableList<FunctionSpec>>()
       fields.forEach { field ->
+        val span = field.field.span
+        val doc = field.field.docComment
         when (val kind = field.kind) {
           is FieldKind.Struct -> {
             val returnType = field.propertyType() ?: return@forEach
@@ -809,6 +839,8 @@ internal class FlatbuffersFirDeclarationGenerator(
                     ),
                   ),
                 key = FlatbuffersFirKeys.StructMemberFunction,
+                span = span,
+                docComment = doc,
               )
             )
           }
@@ -862,7 +894,13 @@ internal class FlatbuffersFirDeclarationGenerator(
           val name = Name.identifier(enumValue.name)
           putIfAbsent(
             name,
-            PropertySpec(name, enum.classId().toType(), FlatbuffersFirKeys.EnumCompanionProperty),
+            PropertySpec(
+              name,
+              enum.classId().toType(),
+              FlatbuffersFirKeys.EnumCompanionProperty,
+              span = enumValue.span,
+              docComment = enumValue.docComment,
+            ),
           )
         }
         val namesProperty = Name.identifier("names")
@@ -905,6 +943,8 @@ internal class FlatbuffersFirDeclarationGenerator(
       val result = linkedMapOf<Name, MutableList<FunctionSpec>>()
 
       tableFieldsByClassId[table.classId()].orEmpty().forEach { field ->
+        val span = field.field.span
+        val doc = field.field.docComment
         field.addFunctionParameterType()?.let { parameterType ->
           val builderParam = builderParameter()
           val valueParam =
@@ -919,6 +959,8 @@ internal class FlatbuffersFirDeclarationGenerator(
               returnType = unitType,
               parameters = listOf(builderParam, valueParam),
               key = FlatbuffersFirKeys.TableCompanionFunction,
+              span = span,
+              docComment = doc,
             )
           )
         }
@@ -940,6 +982,7 @@ internal class FlatbuffersFirDeclarationGenerator(
       )
 
       tableKeyParameterType(table)?.let { keyType ->
+        val keyField = tableKeyFieldByClassId[table.classId()]
         val objParam =
           ParameterSpec(
             name = "obj",
@@ -970,6 +1013,8 @@ internal class FlatbuffersFirDeclarationGenerator(
             returnType = nullableTableType,
             parameters = listOf(objParam, vectorLocationParam, keyParam, bufferParam),
             key = FlatbuffersFirKeys.TableCompanionFunction,
+            span = keyField?.field?.span,
+            docComment = keyField?.field?.docComment,
           )
         )
       }
@@ -1018,6 +1063,8 @@ internal class FlatbuffersFirDeclarationGenerator(
     field: TableFieldModel,
     elementKind: FieldKind,
   ) {
+    val span = field.field.span
+    val doc = field.field.docComment
     val indexParam =
       ParameterSpec(
         name = "j",
@@ -1027,15 +1074,51 @@ internal class FlatbuffersFirDeclarationGenerator(
     when (elementKind) {
       is FieldKind.Scalar -> {
         val elementType = scalarType(elementKind.scalar)
-        accumulator.addFunction(FunctionSpec(field.name, elementType, listOf(indexParam), FlatbuffersFirKeys.TableMemberFunction))
+        accumulator.addFunction(
+          FunctionSpec(
+            field.name,
+            elementType,
+            listOf(indexParam),
+            FlatbuffersFirKeys.TableMemberFunction,
+            span = span,
+            docComment = doc,
+          )
+        )
         val asBufferName = field.name.asBufferName()
-        accumulator.addFunction(FunctionSpec(asBufferName, readBufferType, emptyList(), FlatbuffersFirKeys.TableMemberFunction))
+        accumulator.addFunction(
+          FunctionSpec(
+            asBufferName,
+            readBufferType,
+            emptyList(),
+            FlatbuffersFirKeys.TableMemberFunction,
+            span = span,
+            docComment = doc,
+          )
+        )
       }
       FieldKind.StringType -> {
         val elementType = StandardClassIds.String.toType(nullable = true)
-        accumulator.addFunction(FunctionSpec(field.name, elementType, listOf(indexParam), FlatbuffersFirKeys.TableMemberFunction))
+        accumulator.addFunction(
+          FunctionSpec(
+            field.name,
+            elementType,
+            listOf(indexParam),
+            FlatbuffersFirKeys.TableMemberFunction,
+            span = span,
+            docComment = doc,
+          )
+        )
         val asBufferName = field.name.asBufferName()
-        accumulator.addFunction(FunctionSpec(asBufferName, readBufferType, emptyList(), FlatbuffersFirKeys.TableMemberFunction))
+        accumulator.addFunction(
+          FunctionSpec(
+            asBufferName,
+            readBufferType,
+            emptyList(),
+            FlatbuffersFirKeys.TableMemberFunction,
+            span = span,
+            docComment = doc,
+          )
+        )
       }
       is FieldKind.Struct -> {
         val structType = elementKind.struct.classId().toType(nullable = true)
@@ -1046,8 +1129,26 @@ internal class FlatbuffersFirDeclarationGenerator(
             type = structParamType,
             key = FlatbuffersFirKeys.TableMemberFunction,
           )
-        accumulator.addFunction(FunctionSpec(field.name, structType, listOf(indexParam), FlatbuffersFirKeys.TableMemberFunction))
-        accumulator.addFunction(FunctionSpec(field.name, structType, listOf(objParam, indexParam), FlatbuffersFirKeys.TableMemberFunction))
+        accumulator.addFunction(
+          FunctionSpec(
+            field.name,
+            structType,
+            listOf(indexParam),
+            FlatbuffersFirKeys.TableMemberFunction,
+            span = span,
+            docComment = doc,
+          )
+        )
+        accumulator.addFunction(
+          FunctionSpec(
+            field.name,
+            structType,
+            listOf(objParam, indexParam),
+            FlatbuffersFirKeys.TableMemberFunction,
+            span = span,
+            docComment = doc,
+          )
+        )
       }
       is FieldKind.Table -> {
         val tableReturnType = elementKind.table.classId().toType(nullable = true)
@@ -1058,13 +1159,40 @@ internal class FlatbuffersFirDeclarationGenerator(
             type = tableParamType,
             key = FlatbuffersFirKeys.TableMemberFunction,
           )
-        accumulator.addFunction(FunctionSpec(field.name, tableReturnType, listOf(indexParam), FlatbuffersFirKeys.TableMemberFunction))
-        accumulator.addFunction(FunctionSpec(field.name, tableReturnType, listOf(objParam, indexParam), FlatbuffersFirKeys.TableMemberFunction))
+        accumulator.addFunction(
+          FunctionSpec(
+            field.name,
+            tableReturnType,
+            listOf(indexParam),
+            FlatbuffersFirKeys.TableMemberFunction,
+            span = span,
+            docComment = doc,
+          )
+        )
+        accumulator.addFunction(
+          FunctionSpec(
+            field.name,
+            tableReturnType,
+            listOf(objParam, indexParam),
+            FlatbuffersFirKeys.TableMemberFunction,
+            span = span,
+            docComment = doc,
+          )
+        )
       }
       is FieldKind.Union -> {
         val typeName = field.name.typeName()
         val unionEnumType = elementKind.union.classId().toType()
-        accumulator.addFunction(FunctionSpec(typeName, unionEnumType, listOf(indexParam), FlatbuffersFirKeys.TableMemberFunction))
+        accumulator.addFunction(
+          FunctionSpec(
+            typeName,
+            unionEnumType,
+            listOf(indexParam),
+            FlatbuffersFirKeys.TableMemberFunction,
+            span = span,
+            docComment = doc,
+          )
+        )
         val objParam =
           ParameterSpec(
             name = "obj",
@@ -1072,7 +1200,16 @@ internal class FlatbuffersFirDeclarationGenerator(
             key = FlatbuffersFirKeys.TableMemberFunction,
           )
         val unionReturnType = tableClassId.toType(nullable = true)
-        accumulator.addFunction(FunctionSpec(field.name, unionReturnType, listOf(objParam, indexParam), FlatbuffersFirKeys.TableMemberFunction))
+        accumulator.addFunction(
+          FunctionSpec(
+            field.name,
+            unionReturnType,
+            listOf(objParam, indexParam),
+            FlatbuffersFirKeys.TableMemberFunction,
+            span = span,
+            docComment = doc,
+          )
+        )
       }
       else -> Unit
     }
@@ -1100,6 +1237,8 @@ internal class FlatbuffersFirDeclarationGenerator(
     val vectorKind = field.kind as? FieldKind.Vector ?: return
     val vectorOffsetType = vectorOffsetType(vectorKind.elementKind) ?: return
     val vectorArrayType = vectorArrayParameterType(vectorKind.elementKind) ?: return
+    val span = field.field.span
+    val doc = field.field.docComment
 
     val builderParam = builderParameter()
     val vectorParam =
@@ -1114,6 +1253,8 @@ internal class FlatbuffersFirDeclarationGenerator(
         returnType = vectorOffsetType,
         parameters = listOf(builderParam, vectorParam),
         key = FlatbuffersFirKeys.TableCompanionFunction,
+        span = span,
+        docComment = doc,
       )
     )
 
@@ -1129,6 +1270,8 @@ internal class FlatbuffersFirDeclarationGenerator(
         returnType = StandardClassIds.Unit.toType(),
         parameters = listOf(builderParam, numElemsParam),
         key = FlatbuffersFirKeys.TableCompanionFunction,
+        span = span,
+        docComment = doc,
       )
     )
   }
