@@ -48,7 +48,8 @@ linklint_results
 Makefile
 flatbenchmark
 flatbenchmark.exe
-flatc
+/flatc
+!flatc-kotlin/**
 flatc.exe
 flathash
 flathash.exe

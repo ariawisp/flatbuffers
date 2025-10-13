@@ -85,6 +85,11 @@ project(":compiler-plugin") {
     add("implementation", project(":compat"))
     add("implementation", "org.jetbrains.kotlin:kotlin-compiler-embeddable:$kotlinVersion")
     add("implementation", "org.jetbrains.kotlin:kotlin-reflect:$kotlinVersion")
+    add("testImplementation", kotlin("test"))
+    add("testImplementation", kotlin("test-junit"))
+    add("testImplementation", "org.junit.jupiter:junit-jupiter-api:5.10.2")
+    add("testRuntimeOnly", "org.junit.jupiter:junit-jupiter-engine:5.10.2")
+    add("testRuntimeOnly", "org.junit.platform:junit-platform-launcher:1.10.2")
   }
 
 }
