@@ -7,6 +7,8 @@ import dev.flatbuffers.ast.ScalarType
 import dev.flatbuffers.semantics.ResolvedEnum
 import dev.flatbuffers.semantics.ResolvedStruct
 import dev.flatbuffers.semantics.ResolvedTable
+import dev.flatbuffers.semantics.ResolvedUnion
+import org.jetbrains.kotlin.GeneratedDeclarationKey
 import org.jetbrains.kotlin.fir.FirSession
 import org.jetbrains.kotlin.fir.extensions.ExperimentalTopLevelDeclarationsGenerationApi
 import org.jetbrains.kotlin.fir.extensions.FirDeclarationGenerationExtension
@@ -28,6 +30,7 @@ import org.jetbrains.kotlin.name.ClassId
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.name.StandardClassIds
+import java.util.Locale
 
 internal class FlatbuffersFirDeclarationGenerator(
   session: FirSession,
@@ -49,6 +52,9 @@ internal class FlatbuffersFirDeclarationGenerator(
   private val offsetClassId = ClassId(runtimePackage, Name.identifier("Offset"))
   private val vectorOffsetClassId = ClassId(runtimePackage, Name.identifier("VectorOffset"))
   private val unionOffsetClassId = ClassId(runtimePackage, Name.identifier("UnionOffset"))
+  private val offsetArrayClassId = ClassId(runtimePackage, Name.identifier("OffsetArray"))
+  private val stringOffsetArrayClassId = ClassId(runtimePackage, Name.identifier("StringOffsetArray"))
+  private val unionOffsetArrayClassId = ClassId(runtimePackage, Name.identifier("UnionOffsetArray"))
 
   private val readWriteBufferType by lazy { readWriteBufferClassId.toType() }
   private val readBufferType by lazy { readBufferClassId.toType() }
@@ -60,6 +66,32 @@ internal class FlatbuffersFirDeclarationGenerator(
   private val enumsByClassId: Map<ClassId, ResolvedEnum>
   private val structFieldsByClassId: Map<ClassId, List<TableFieldModel>>
   private val tableFieldsByClassId: Map<ClassId, List<TableFieldModel>>
+  private val rootTableClassIds: Set<ClassId>
+  private val tablePropertyCache = mutableMapOf<ClassId, Map<Name, PropertySpec>>()
+  private val tableFunctionCache = mutableMapOf<ClassId, Map<Name, List<FunctionSpec>>>()
+  private val tableCompanionFunctionCache = mutableMapOf<ClassId, Map<Name, List<FunctionSpec>>>()
+
+  private data class ParameterSpec(
+    val name: String,
+    val type: ConeKotlinType,
+    val key: GeneratedDeclarationKey,
+    val hasDefaultValue: Boolean = false,
+    val isVararg: Boolean = false,
+  )
+
+  private data class FunctionSpec(
+    val name: Name,
+    val returnType: ConeKotlinType,
+    val parameters: List<ParameterSpec>,
+    val key: GeneratedDeclarationKey,
+  )
+
+  private data class PropertySpec(
+    val name: Name,
+    val returnType: ConeKotlinType,
+    val key: GeneratedDeclarationKey,
+    val isMutable: Boolean = false,
+  )
 
   init {
     val tableMap = linkedMapOf<ClassId, ResolvedTable>()
@@ -80,6 +112,7 @@ internal class FlatbuffersFirDeclarationGenerator(
     enumsByClassId = enumMap
     structFieldsByClassId = structMap.mapValues { (_, struct) -> struct.toFieldModels(schemaIndex) }
     tableFieldsByClassId = tableMap.mapValues { (_, table) -> table.toFieldModels(schemaIndex) }
+    rootTableClassIds = schemaIndex.rootTables.mapTo(linkedSetOf()) { it.classId() }
   }
 
   @ExperimentalTopLevelDeclarationsGenerationApi
@@ -140,11 +173,14 @@ internal class FlatbuffersFirDeclarationGenerator(
     context: DeclarationGenerationContext.Member,
   ): Set<Name> {
     val classId = classSymbol.classId
-    tablesByClassId[classId]?.let {
+    tablesByClassId[classId]?.let { table ->
+      val properties = tablePropertySpecs(table)
+      val functions = tableFunctionSpecs(table)
       return buildSet {
         add(initName)
         add(resetName)
-        tableFieldsByClassId[classId]?.forEach { field -> add(field.name) }
+        addAll(properties.keys)
+        addAll(functions.keys)
       }
     }
     structsByClassId[classId]?.let {
@@ -158,11 +194,13 @@ internal class FlatbuffersFirDeclarationGenerator(
       tablesByClassId[outerClassId]?.let { table ->
         val startName = startFunctionName(table)
         val endName = endFunctionName(table)
+        val companionFunctions = tableCompanionFunctionSpecs(table)
         return buildSet {
           add(validateVersionName)
           add(asRootName)
           add(startName)
           add(endName)
+          addAll(companionFunctions.keys)
         }
       }
       structsByClassId[outerClassId]?.let { struct ->
@@ -205,20 +243,17 @@ internal class FlatbuffersFirDeclarationGenerator(
   ): List<FirPropertySymbol> {
     val owner = context?.owner ?: return emptyList()
     val classId = owner.classId
-    val fieldModels =
-      tableFieldsByClassId[classId]
-        ?: structFieldsByClassId[classId]
-        ?: run {
-          if (classId.shortClassName == companionName) {
-            return emptyList()
-          }
-          return emptyList()
-        }
-    val targetField = fieldModels.firstOrNull { it.name == callableId.callableName } ?: return emptyList()
-    val propertyType = targetField.propertyType() ?: return emptyList()
-    val property =
-      stubProperty(owner, FlatbuffersFirKeys.TableProperty, callableId.callableName, propertyType)
-    return listOf(property.symbol)
+    tablesByClassId[classId]?.let { table ->
+      val propertySpec = tablePropertySpecs(table)[callableId.callableName] ?: return emptyList()
+      return listOf(createProperty(owner, propertySpec))
+    }
+    structFieldsByClassId[classId] ?: run {
+      if (classId.shortClassName == companionName) {
+        return emptyList()
+      }
+      return emptyList()
+    }
+    return emptyList()
   }
 
   @ExperimentalTopLevelDeclarationsGenerationApi
@@ -243,6 +278,7 @@ internal class FlatbuffersFirDeclarationGenerator(
   private fun ResolvedTable.classId(): ClassId = classIdFrom(namespace, name)
   private fun ResolvedStruct.classId(): ClassId = classIdFrom(namespace, name)
   private fun ResolvedEnum.classId(): ClassId = classIdFrom(namespace, name)
+  private fun ResolvedUnion.classId(): ClassId = classIdFrom(namespace, name)
 
   private fun generateTableFunction(
     owner: FirClassSymbol<*>,
@@ -264,7 +300,10 @@ internal class FlatbuffersFirDeclarationGenerator(
             valueParameter("buffer", readWriteBufferType, FlatbuffersFirKeys.TableMemberFunction)
           }.symbol
         )
-      else -> emptyList()
+      else ->
+        tableFunctionSpecs(table)[callableId.callableName]
+          ?.map { createFunction(owner, it) }
+          ?: emptyList()
     }
 
   private fun generateTableCompanionFunction(
@@ -305,7 +344,10 @@ internal class FlatbuffersFirDeclarationGenerator(
             valueParameter("builder", flatBufferBuilderType, FlatbuffersFirKeys.TableCompanionFunction)
           }.symbol
         )
-      else -> emptyList()
+      else ->
+        tableCompanionFunctionSpecs(table)[callableId.callableName]
+          ?.map { createFunction(owner, it) }
+          ?: emptyList()
     }
   }
 
@@ -349,14 +391,396 @@ internal class FlatbuffersFirDeclarationGenerator(
     }
   }
 
+  private fun createFunction(
+    owner: FirClassSymbol<*>,
+    spec: FunctionSpec,
+  ): FirNamedFunctionSymbol {
+    val function =
+      stubFunction(owner, spec.key, spec.name, spec.returnType) {
+        spec.parameters.forEach { parameter ->
+          valueParameter(
+            parameter.name,
+            parameter.type,
+            parameter.key,
+            hasDefaultValue = parameter.hasDefaultValue,
+            isVararg = parameter.isVararg,
+          )
+        }
+      }
+    return function.symbol
+  }
+
+  private fun createProperty(
+    owner: FirClassSymbol<*>,
+    spec: PropertySpec,
+  ): FirPropertySymbol {
+    val property =
+      stubProperty(
+        owner,
+        spec.key,
+        spec.name,
+        spec.returnType,
+        isMutable = spec.isMutable,
+      )
+    return property.symbol
+  }
+
+  private fun tablePropertySpecs(table: ResolvedTable): Map<Name, PropertySpec> =
+    tablePropertyCache.getOrPut(table.classId()) {
+      val fields = tableFieldsByClassId[table.classId()].orEmpty()
+      buildMap {
+        fields.forEach { field ->
+          when (val kind = field.kind) {
+            is FieldKind.Scalar -> putIfAbsent(field.name, PropertySpec(field.name, scalarType(kind.scalar), FlatbuffersFirKeys.TableProperty))
+            FieldKind.StringType -> {
+              val type = StandardClassIds.String.toType(nullable = !field.isRequired())
+              putIfAbsent(field.name, PropertySpec(field.name, type, FlatbuffersFirKeys.TableProperty))
+            }
+            is FieldKind.Struct -> {
+              val structType = kind.struct.classId().toType(nullable = true)
+              putIfAbsent(field.name, PropertySpec(field.name, structType, FlatbuffersFirKeys.TableProperty))
+            }
+            is FieldKind.Table -> {
+              val referencedType = kind.table.classId().toType(nullable = true)
+              putIfAbsent(field.name, PropertySpec(field.name, referencedType, FlatbuffersFirKeys.TableProperty))
+            }
+            is FieldKind.Union -> {
+              val typePropertyName = Name.identifier("${field.name.asString()}Type")
+              val unionType = kind.union.classId().toType()
+              putIfAbsent(typePropertyName, PropertySpec(typePropertyName, unionType, FlatbuffersFirKeys.TableProperty))
+            }
+            is FieldKind.Vector -> {
+              val lengthName = field.name.lengthName()
+              putIfAbsent(lengthName, PropertySpec(lengthName, StandardClassIds.Int.toType(), FlatbuffersFirKeys.TableProperty))
+            }
+            else -> Unit
+          }
+        }
+      }
+    }
+
+  private fun tableFunctionSpecs(table: ResolvedTable): Map<Name, List<FunctionSpec>> =
+    tableFunctionCache.getOrPut(table.classId()) {
+      val fields = tableFieldsByClassId[table.classId()].orEmpty()
+      val accumulator = linkedMapOf<Name, MutableList<FunctionSpec>>()
+      fields.forEach { field ->
+        when (val kind = field.kind) {
+          FieldKind.StringType -> {
+            val name = Name.identifier("${field.name.asString()}AsBuffer")
+            accumulator.getOrPut(name) { mutableListOf() } +=
+              FunctionSpec(
+                name = name,
+                returnType = readBufferType,
+                parameters = emptyList(),
+                key = FlatbuffersFirKeys.TableMemberFunction,
+              )
+          }
+          is FieldKind.Struct -> {
+            val structType = kind.struct.classId().toType(nullable = true)
+            val structParameterType = kind.struct.classId().toType(nullable = false)
+            accumulator.getOrPut(field.name) { mutableListOf() } +=
+              FunctionSpec(
+                name = field.name,
+                returnType = structType,
+                parameters =
+                  listOf(
+                    ParameterSpec(
+                      name = "obj",
+                      type = structParameterType,
+                      key = FlatbuffersFirKeys.TableMemberFunction,
+                    ),
+                  ),
+                key = FlatbuffersFirKeys.TableMemberFunction,
+              )
+          }
+          is FieldKind.Table -> {
+            val referencedType = kind.table.classId().toType(nullable = true)
+            val parameterType = kind.table.classId().toType(nullable = false)
+            accumulator.getOrPut(field.name) { mutableListOf() } +=
+              FunctionSpec(
+                name = field.name,
+                returnType = referencedType,
+                parameters =
+                  listOf(
+                    ParameterSpec(
+                      name = "obj",
+                      type = parameterType,
+                      key = FlatbuffersFirKeys.TableMemberFunction,
+                    ),
+                  ),
+                key = FlatbuffersFirKeys.TableMemberFunction,
+              )
+          }
+          is FieldKind.Union -> {
+            val unionFunctionName = field.name
+            val unionReturnType = tableClassId.toType(nullable = true)
+            accumulator.getOrPut(unionFunctionName) { mutableListOf() } +=
+              FunctionSpec(
+                name = unionFunctionName,
+                returnType = unionReturnType,
+                parameters =
+                  listOf(
+                    ParameterSpec(
+                      name = "obj",
+                      type = tableType,
+                      key = FlatbuffersFirKeys.TableMemberFunction,
+                    ),
+                  ),
+                key = FlatbuffersFirKeys.TableMemberFunction,
+              )
+          }
+          is FieldKind.Vector -> addVectorFunctionSpecs(accumulator, field, kind.elementKind)
+          else -> Unit
+        }
+      }
+      accumulator.mapValues { (_, value) -> value.toList() }
+    }
+
+  private fun tableCompanionFunctionSpecs(table: ResolvedTable): Map<Name, List<FunctionSpec>> =
+    tableCompanionFunctionCache.getOrPut(table.classId()) {
+      val unitType = StandardClassIds.Unit.toType()
+      val result = linkedMapOf<Name, MutableList<FunctionSpec>>()
+
+      tableFieldsByClassId[table.classId()].orEmpty().forEach { field ->
+        field.addFunctionParameterType()?.let { parameterType ->
+          val builderParam = builderParameter()
+          val valueParam =
+            ParameterSpec(
+              name = field.name.asString(),
+              type = parameterType,
+              key = FlatbuffersFirKeys.TableCompanionFunction,
+            )
+          result.addFunction(
+            FunctionSpec(
+              name = field.name.withPrefix("add"),
+              returnType = unitType,
+              parameters = listOf(builderParam, valueParam),
+              key = FlatbuffersFirKeys.TableCompanionFunction,
+            )
+          )
+        }
+
+        if (field.kind is FieldKind.Vector) {
+          addCompanionVectorFunctions(result, field)
+        }
+      }
+
+      if (table.classId() in rootTableClassIds) {
+        val builderParam = builderParameter()
+        val offsetType = offsetClassId.toType(table.classId().toType())
+        val offsetParam =
+          ParameterSpec(
+            name = "offset",
+            type = offsetType,
+            key = FlatbuffersFirKeys.TableCompanionFunction,
+          )
+        result.addFunction(
+          FunctionSpec(
+            name = finishFunctionName(table),
+            returnType = unitType,
+            parameters = listOf(builderParam, offsetParam),
+            key = FlatbuffersFirKeys.TableCompanionFunction,
+          )
+        )
+        result.addFunction(
+          FunctionSpec(
+            name = finishSizePrefixedFunctionName(table),
+            returnType = unitType,
+            parameters = listOf(builderParam, offsetParam),
+            key = FlatbuffersFirKeys.TableCompanionFunction,
+          )
+        )
+      }
+
+      result.mapValues { (_, value) -> value.toList() }
+    }
+
   private fun TableFieldModel.propertyType(): ConeKotlinType? =
     when (val kind = kind) {
       is FieldKind.Scalar -> scalarType(kind.scalar)
-      FieldKind.StringType -> StandardClassIds.String.toType(nullable = true)
+      FieldKind.StringType -> StandardClassIds.String.toType(nullable = !isRequired())
       is FieldKind.Struct -> kind.struct.classId().toType(nullable = true)
       is FieldKind.Table -> kind.table.classId().toType(nullable = true)
       else -> null
     }
+
+  private fun TableFieldModel.isRequired(): Boolean =
+    field.attributes.any { it.name.equals("required", ignoreCase = true) }
+
+  private fun addVectorFunctionSpecs(
+    accumulator: MutableMap<Name, MutableList<FunctionSpec>>,
+    field: TableFieldModel,
+    elementKind: FieldKind,
+  ) {
+    val indexParam =
+      ParameterSpec(
+        name = "j",
+        type = StandardClassIds.Int.toType(),
+        key = FlatbuffersFirKeys.TableMemberFunction,
+      )
+    when (elementKind) {
+      is FieldKind.Scalar -> {
+        val elementType = scalarType(elementKind.scalar)
+        accumulator.addFunction(FunctionSpec(field.name, elementType, listOf(indexParam), FlatbuffersFirKeys.TableMemberFunction))
+        val asBufferName = field.name.asBufferName()
+        accumulator.addFunction(FunctionSpec(asBufferName, readBufferType, emptyList(), FlatbuffersFirKeys.TableMemberFunction))
+      }
+      FieldKind.StringType -> {
+        val elementType = StandardClassIds.String.toType(nullable = true)
+        accumulator.addFunction(FunctionSpec(field.name, elementType, listOf(indexParam), FlatbuffersFirKeys.TableMemberFunction))
+        val asBufferName = field.name.asBufferName()
+        accumulator.addFunction(FunctionSpec(asBufferName, readBufferType, emptyList(), FlatbuffersFirKeys.TableMemberFunction))
+      }
+      is FieldKind.Struct -> {
+        val structType = elementKind.struct.classId().toType(nullable = true)
+        val structParamType = elementKind.struct.classId().toType(nullable = false)
+        val objParam =
+          ParameterSpec(
+            name = "obj",
+            type = structParamType,
+            key = FlatbuffersFirKeys.TableMemberFunction,
+          )
+        accumulator.addFunction(FunctionSpec(field.name, structType, listOf(indexParam), FlatbuffersFirKeys.TableMemberFunction))
+        accumulator.addFunction(FunctionSpec(field.name, structType, listOf(objParam, indexParam), FlatbuffersFirKeys.TableMemberFunction))
+      }
+      is FieldKind.Table -> {
+        val tableReturnType = elementKind.table.classId().toType(nullable = true)
+        val tableParamType = elementKind.table.classId().toType(nullable = false)
+        val objParam =
+          ParameterSpec(
+            name = "obj",
+            type = tableParamType,
+            key = FlatbuffersFirKeys.TableMemberFunction,
+          )
+        accumulator.addFunction(FunctionSpec(field.name, tableReturnType, listOf(indexParam), FlatbuffersFirKeys.TableMemberFunction))
+        accumulator.addFunction(FunctionSpec(field.name, tableReturnType, listOf(objParam, indexParam), FlatbuffersFirKeys.TableMemberFunction))
+      }
+      is FieldKind.Union -> {
+        val typeName = field.name.typeName()
+        val unionEnumType = elementKind.union.classId().toType()
+        accumulator.addFunction(FunctionSpec(typeName, unionEnumType, listOf(indexParam), FlatbuffersFirKeys.TableMemberFunction))
+        val objParam =
+          ParameterSpec(
+            name = "obj",
+            type = tableType,
+            key = FlatbuffersFirKeys.TableMemberFunction,
+          )
+        val unionReturnType = tableClassId.toType(nullable = true)
+        accumulator.addFunction(FunctionSpec(field.name, unionReturnType, listOf(objParam, indexParam), FlatbuffersFirKeys.TableMemberFunction))
+      }
+      else -> Unit
+    }
+  }
+
+  private fun MutableMap<Name, MutableList<FunctionSpec>>.addFunction(spec: FunctionSpec) {
+    getOrPut(spec.name) { mutableListOf() } += spec
+  }
+
+  private fun TableFieldModel.addFunctionParameterType(): ConeKotlinType? =
+    when (val kind = kind) {
+      is FieldKind.Scalar -> scalarType(kind.scalar)
+      FieldKind.StringType -> offsetClassId.toType(StandardClassIds.String.toType())
+      is FieldKind.Struct -> offsetClassId.toType(kind.struct.classId().toType())
+      is FieldKind.Table -> offsetClassId.toType(kind.table.classId().toType())
+      is FieldKind.Union -> unionOffsetType
+      is FieldKind.Vector -> vectorOffsetType(kind.elementKind)
+      else -> null
+    }
+
+  private fun addCompanionVectorFunctions(
+    accumulator: MutableMap<Name, MutableList<FunctionSpec>>,
+    field: TableFieldModel,
+  ) {
+    val vectorKind = field.kind as? FieldKind.Vector ?: return
+    val vectorOffsetType = vectorOffsetType(vectorKind.elementKind) ?: return
+    val vectorArrayType = vectorArrayParameterType(vectorKind.elementKind) ?: return
+
+    val builderParam = builderParameter()
+    val vectorParam =
+      ParameterSpec(
+        name = "vector",
+        type = vectorArrayType,
+        key = FlatbuffersFirKeys.TableCompanionFunction,
+      )
+    accumulator.addFunction(
+      FunctionSpec(
+        name = field.name.withPrefix("create", "Vector"),
+        returnType = vectorOffsetType,
+        parameters = listOf(builderParam, vectorParam),
+        key = FlatbuffersFirKeys.TableCompanionFunction,
+      )
+    )
+
+    val numElemsParam =
+      ParameterSpec(
+        name = "numElems",
+        type = StandardClassIds.Int.toType(),
+        key = FlatbuffersFirKeys.TableCompanionFunction,
+      )
+    accumulator.addFunction(
+      FunctionSpec(
+        name = field.name.withPrefix("start", "Vector"),
+        returnType = StandardClassIds.Unit.toType(),
+        parameters = listOf(builderParam, numElemsParam),
+        key = FlatbuffersFirKeys.TableCompanionFunction,
+      )
+    )
+  }
+
+  private fun builderParameter(): ParameterSpec =
+    ParameterSpec("builder", flatBufferBuilderType, FlatbuffersFirKeys.TableCompanionFunction)
+
+  private fun vectorOffsetType(kind: FieldKind): ConeKotlinType? =
+    vectorElementType(kind)?.let { vectorOffsetClassId.toType(it) }
+
+  private fun vectorElementType(kind: FieldKind): ConeKotlinType? =
+    when (kind) {
+      is FieldKind.Scalar -> scalarType(kind.scalar)
+      FieldKind.StringType -> StandardClassIds.String.toType()
+      is FieldKind.Struct -> kind.struct.classId().toType()
+      is FieldKind.Table -> kind.table.classId().toType()
+      is FieldKind.Union -> unionOffsetType
+      else -> null
+    }
+
+  private fun vectorArrayParameterType(kind: FieldKind): ConeKotlinType? =
+    when (kind) {
+      is FieldKind.Scalar -> scalarArrayType(kind.scalar)
+      FieldKind.StringType -> stringOffsetArrayClassId.toType()
+      is FieldKind.Struct -> offsetArrayClassId.toType(kind.struct.classId().toType())
+      is FieldKind.Table -> offsetArrayClassId.toType(kind.table.classId().toType())
+      is FieldKind.Union -> unionOffsetArrayClassId.toType()
+      else -> null
+    }
+
+  private fun scalarArrayType(scalar: ScalarType): ConeKotlinType? {
+    val elementClassId = scalarClassId(scalar)
+    val primitiveArray = StandardClassIds.primitiveArrayTypeByElementType[elementClassId]
+    val unsignedArray = StandardClassIds.unsignedArrayTypeByElementType[elementClassId]
+    val arrayClassId = primitiveArray ?: unsignedArray
+    return arrayClassId?.toType() ?: StandardClassIds.Array.toType(scalarType(scalar))
+  }
+
+  private fun scalarClassId(scalar: ScalarType): ClassId =
+    when (scalar) {
+      ScalarType.BOOL -> StandardClassIds.Boolean
+      ScalarType.BYTE -> StandardClassIds.Byte
+      ScalarType.UBYTE -> StandardClassIds.UByte
+      ScalarType.SHORT -> StandardClassIds.Short
+      ScalarType.USHORT -> StandardClassIds.UShort
+      ScalarType.INT -> StandardClassIds.Int
+      ScalarType.UINT -> StandardClassIds.UInt
+      ScalarType.LONG -> StandardClassIds.Long
+      ScalarType.ULONG -> StandardClassIds.ULong
+      ScalarType.FLOAT -> StandardClassIds.Float
+      ScalarType.DOUBLE -> StandardClassIds.Double
+    }
+
+  private fun finishFunctionName(table: ResolvedTable): Name =
+    Name.identifier("finish${table.name.capitalizeAscii()}Buffer")
+
+  private fun finishSizePrefixedFunctionName(table: ResolvedTable): Name =
+    Name.identifier("finishSizePrefixed${table.name.capitalizeAscii()}Buffer")
 
   private fun scalarType(scalar: ScalarType): ConeKotlinType =
     when (scalar) {
@@ -387,6 +811,16 @@ internal class FlatbuffersFirDeclarationGenerator(
       arguments.map { ConeKotlinTypeProjectionOut(it) }.toTypedArray(),
       nullable,
     )
+
+  private fun String.capitalizeAscii(): String =
+    replaceFirstChar { if (it.isLowerCase()) it.titlecase(Locale.ROOT) else it.toString() }
+
+  private fun Name.withPrefix(prefix: String, suffix: String = ""): Name =
+    Name.identifier(prefix + asString().capitalizeAscii() + suffix)
+
+  private fun Name.lengthName(): Name = Name.identifier("${asString()}Length")
+  private fun Name.asBufferName(): Name = Name.identifier("${asString()}AsBuffer")
+  private fun Name.typeName(): Name = Name.identifier("${asString()}Type")
 
   private fun classIdFrom(namespace: String?, simpleName: String): ClassId {
     val packageFqName = namespace?.takeIf { it.isNotBlank() }?.let(::FqName) ?: FqName.ROOT
