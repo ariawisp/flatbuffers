@@ -21,22 +21,20 @@ This document sketches the FIR surface that the FlatBuffers compiler plugin must
 Goal: generated FIR nodes expose `.source` that points back to the `.fbs` definition so IDEs and
 compiler diagnostics can navigate into schemas.
 
-Plan:
+Implementation:
 
-1. Introduce `FbsSourceFile` & `FbsSourceElement`
-   - Wrap schema `Path` + `SourceSpan`.
-   - Implements/embeds `KtSourceFile`/`KtSourceElement`, returning `null` PSI but stable offsets.
-   - Compatible with `CompatContext.fakeElement` by returning an underlying `KtSourceElement`
-     derived from `org.jetbrains.kotlin.psi.KtPsiSourceElement`.
-2. Extend `CompatContext` with utilities:
-   - `fun fromSpan(span: SourceSpan, kind: KtFakeSourceElementKind = PluginGenerated): KtSourceElement`
-     constructing a fake element anchored to `.fbs`.
-   - `fun FirDeclaration.withSchemaSource(span: SourceSpan?, fallbackKind: KtFakeSourceElementKind)`
-     convenience to attach the element when span is present.
-3. Store a per-session cache (`SchemaSourceIndex`) mapping `(file path → KtSourceFile)` to reuse
-   open handles per schema file and support highlight ranges.
+- `SchemaSourceIndex` is a session-scoped cache that lazily loads schema files, precomputes
+  line-start offsets, and produces `KtLightSourceElement` instances from a `SourceSpan`. Multiple
+  declarations from the same file share the cached text.
+- Builder helpers (`withSchemaSource` + the `stubFunction`/`stubProperty` wrappers) thread spans and
+  doc comments through every generated declaration. When a span is missing we intentionally keep the
+  plugin-generated fake source so synthetic helpers remain obvious.
+- Doc strings are flattened into a single `String` and stored on the FIR node via an extension
+  property (`FirDeclaration.flatbuffersSchemaDoc`) registered with `FirDeclarationDataRegistry`.
+  IR and tooling can later recover them even though FIR has no built-in doc slot.
 
-If span is `null`, fall back to `PluginGenerated`. IR lowering must mirror the same mapping.
+If a declaration has neither span nor doc comment we leave its source untouched and the doc payload
+`null`, matching previous behaviour.
 
 ## Generated Declarations
 
@@ -151,7 +149,7 @@ from `com.google.flatbuffers.kotlin` in monospace.
     in FIR (e.g., `startMonster`). Stateful logic (binary search in `lookupByKey`) built in IR.
 - How to surface required-field diagnostics? Probably part of IR (since builder required fields are
   runtime).
-- Need to validate whether Kotlin FIR allows multiple fake source kinds pointing to non-Kotlin
-  files; might require custom `VirtualFile` integration.
+- Remaining follow-up: teach IR lowering / renderer to read `flatbuffersSchemaDoc` and materialise
+  real doc comments in generated Kotlin.
 
 This plan should be kept in sync with runtime and IR plans as we iterate.

@@ -96,7 +96,7 @@ internal class FlatbuffersFirDeclarationGenerator(
   private val offsetArraySpecsByCallableId: Map<CallableId, OffsetArraySpec>
   private val enumArraySpecsByAliasId: Map<ClassId, EnumArraySpec>
   @Suppress("unused")
-  private val schemaSourceIndex = SchemaSourceIndex()
+  internal val schemaSourceIndex = SchemaSourceIndex()
 
   private data class ParameterSpec(
     val name: String,
@@ -367,26 +367,46 @@ internal class FlatbuffersFirDeclarationGenerator(
 
   @ExperimentalTopLevelDeclarationsGenerationApi
   private fun generateTableClass(classId: ClassId): FirClassLikeSymbol<*> {
-    return createTopLevelClass(classId, FlatbuffersFirKeys.TableClass).apply {
-      replaceSuperTypeRefs(superTypeRefs + tableType.toFirResolvedTypeRef())
-    }.symbol
+    val table = tablesByClassId.getValue(classId)
+    var schemaDoc: String? = null
+    val klass =
+      createTopLevelClass(classId, FlatbuffersFirKeys.TableClass) {
+        schemaDoc = withSchemaSource(table.span, table.docComment, schemaSourceIndex)
+      }.apply {
+        replaceSuperTypeRefs(superTypeRefs + tableType.toFirResolvedTypeRef())
+      }
+    klass.attachSchemaMetadata(schemaDoc)
+    return klass.symbol
   }
 
   @ExperimentalTopLevelDeclarationsGenerationApi
   private fun generateStructClass(classId: ClassId): FirClassLikeSymbol<*> {
-    return createTopLevelClass(classId, FlatbuffersFirKeys.StructClass).apply {
-      replaceSuperTypeRefs(superTypeRefs + structType.toFirResolvedTypeRef())
-    }.symbol
+    val struct = structsByClassId.getValue(classId)
+    var schemaDoc: String? = null
+    val klass =
+      createTopLevelClass(classId, FlatbuffersFirKeys.StructClass) {
+        schemaDoc = withSchemaSource(struct.span, struct.docComment, schemaSourceIndex)
+      }.apply {
+        replaceSuperTypeRefs(superTypeRefs + structType.toFirResolvedTypeRef())
+      }
+    klass.attachSchemaMetadata(schemaDoc)
+    return klass.symbol
   }
 
   @ExperimentalTopLevelDeclarationsGenerationApi
   private fun generateEnumClass(classId: ClassId): FirClassLikeSymbol<*> {
-    return createTopLevelClass(classId, FlatbuffersFirKeys.EnumClass) {
-      status {
-        isInline = true
-        isValue = true
+    val enum = enumsByClassId.getValue(classId)
+    var schemaDoc: String? = null
+    val klass =
+      createTopLevelClass(classId, FlatbuffersFirKeys.EnumClass) {
+        schemaDoc = withSchemaSource(enum.span, enum.docComment, schemaSourceIndex)
+        status {
+          isInline = true
+          isValue = true
+        }
       }
-    }.symbol
+    klass.attachSchemaMetadata(schemaDoc)
+    return klass.symbol
   }
 
   @ExperimentalTopLevelDeclarationsGenerationApi
@@ -601,7 +621,14 @@ internal class FlatbuffersFirDeclarationGenerator(
     spec: FunctionSpec,
   ): FirNamedFunctionSymbol {
     val function =
-      stubFunction(owner, spec.key, spec.name, spec.returnType) {
+      stubFunction(
+        owner,
+        spec.key,
+        spec.name,
+        spec.returnType,
+        span = spec.span,
+        docComment = spec.docComment,
+      ) {
         spec.parameters.forEach { parameter ->
           valueParameter(
             parameter.name,
@@ -626,6 +653,8 @@ internal class FlatbuffersFirDeclarationGenerator(
         spec.name,
         spec.returnType,
         isMutable = spec.isMutable,
+        span = spec.span,
+        docComment = spec.docComment,
       )
     return property.symbol
   }

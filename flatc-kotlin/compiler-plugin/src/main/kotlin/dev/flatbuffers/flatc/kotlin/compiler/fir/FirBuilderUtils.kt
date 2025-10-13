@@ -1,5 +1,7 @@
 package dev.flatbuffers.flatc.kotlin.compiler.fir
 
+import dev.flatbuffers.ast.DocComment
+import dev.flatbuffers.ast.SourceSpan
 import org.jetbrains.kotlin.GeneratedDeclarationKey
 import org.jetbrains.kotlin.descriptors.Modality
 import org.jetbrains.kotlin.descriptors.Visibility
@@ -31,8 +33,11 @@ internal fun FlatbuffersFirDeclarationGenerator.stubFunction(
   returnType: ConeKotlinType,
   visibility: Visibility = Visibilities.Public,
   modality: Modality = Modality.FINAL,
+  span: SourceSpan? = null,
+  docComment: DocComment? = null,
   configure: SimpleFunctionBuildingContext.() -> Unit = {},
 ): FirSimpleFunction {
+  var schemaDoc: String? = null
   val function =
     createMemberFunction(
       owner = owner,
@@ -40,10 +45,12 @@ internal fun FlatbuffersFirDeclarationGenerator.stubFunction(
       name = name,
       returnType = returnType,
     ) {
+      schemaDoc = withSchemaSource(span, docComment, schemaSourceIndex)
       this.visibility = visibility
       this.modality = modality
       configure()
     }
+  function.attachSchemaMetadata(schemaDoc)
   function.replaceBody(todoBlock("${owner.classId.asFqNameString()}.${name.asString()}"))
   return function
 }
@@ -55,8 +62,11 @@ internal fun FlatbuffersFirDeclarationGenerator.stubProperty(
   returnType: ConeKotlinType,
   hasBackingField: Boolean = false,
   isMutable: Boolean = false,
+  span: SourceSpan? = null,
+  docComment: DocComment? = null,
   configure: PropertyBuildingContext.() -> Unit = {},
 ): FirProperty {
+  var schemaDoc: String? = null
   val property =
     createMemberProperty(
       owner = owner,
@@ -66,8 +76,10 @@ internal fun FlatbuffersFirDeclarationGenerator.stubProperty(
       isVal = !isMutable,
       hasBackingField = hasBackingField,
     ) {
+      schemaDoc = withSchemaSource(span, docComment, schemaSourceIndex)
       configure()
     }
+  property.attachSchemaMetadata(schemaDoc)
   val target = "${owner.classId.asFqNameString()}.${name.asString()}"
   property.getter?.replaceBody(todoBlock(target))
   property.setter?.replaceBody(todoBlock(target))
