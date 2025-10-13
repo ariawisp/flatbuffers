@@ -7,29 +7,34 @@ import dev.flatbuffers.semantics.ResolvedFloatValue
 import dev.flatbuffers.semantics.ResolvedIntegerValue
 import dev.flatbuffers.semantics.ResolvedScalarType
 import dev.flatbuffers.semantics.ResolvedTable
-import org.jetbrains.kotlin.ir.builders.DeclarationIrBuilder
-import org.jetbrains.kotlin.ir.builders.declarations.irTemporary
+import org.jetbrains.kotlin.backend.common.lower.DeclarationIrBuilder
+import org.jetbrains.kotlin.DeprecatedForRemovalCompilerApi
+import org.jetbrains.kotlin.ir.IrStatement
+import org.jetbrains.kotlin.ir.UNDEFINED_OFFSET
+import org.jetbrains.kotlin.ir.builders.IrBuilderWithScope
+import org.jetbrains.kotlin.ir.builders.irBlockBody
+import org.jetbrains.kotlin.ir.builders.irBoolean
+import org.jetbrains.kotlin.ir.builders.irByte
 import org.jetbrains.kotlin.ir.builders.irCall
-import org.jetbrains.kotlin.ir.builders.irDouble
 import org.jetbrains.kotlin.ir.builders.irEquals
-import org.jetbrains.kotlin.ir.builders.irFloat
 import org.jetbrains.kotlin.ir.builders.irGet
 import org.jetbrains.kotlin.ir.builders.irIfThenElse
 import org.jetbrains.kotlin.ir.builders.irInt
 import org.jetbrains.kotlin.ir.builders.irLong
 import org.jetbrains.kotlin.ir.builders.irReturn
 import org.jetbrains.kotlin.ir.builders.irShort
-import org.jetbrains.kotlin.ir.builders.irBlockBody
+import org.jetbrains.kotlin.ir.builders.irTemporary
 import org.jetbrains.kotlin.ir.builders.irUnit
-import org.jetbrains.kotlin.ir.builders.irByte
-import org.jetbrains.kotlin.ir.builders.irBoolean
 import org.jetbrains.kotlin.ir.declarations.IrClass
 import org.jetbrains.kotlin.ir.declarations.IrDeclarationOrigin
+import org.jetbrains.kotlin.ir.declarations.IrParameterKind
 import org.jetbrains.kotlin.ir.declarations.IrProperty
 import org.jetbrains.kotlin.ir.declarations.IrSimpleFunction
 import org.jetbrains.kotlin.ir.declarations.IrValueParameter
 import org.jetbrains.kotlin.ir.expressions.IrExpression
+import org.jetbrains.kotlin.ir.expressions.impl.IrConstImpl
 import org.jetbrains.kotlin.ir.symbols.IrSimpleFunctionSymbol
+import org.jetbrains.kotlin.ir.symbols.UnsafeDuringIrConstructionAPI
 import org.jetbrains.kotlin.ir.types.IrType
 import org.jetbrains.kotlin.ir.util.classId
 import org.jetbrains.kotlin.ir.util.defaultType
@@ -37,6 +42,7 @@ import org.jetbrains.kotlin.ir.visitors.IrElementTransformerVoid
 import org.jetbrains.kotlin.ir.visitors.transformChildrenVoid
 import org.jetbrains.kotlin.name.ClassId
 
+@OptIn(UnsafeDuringIrConstructionAPI::class, DeprecatedForRemovalCompilerApi::class)
 internal class TableBodyLowering(
   private val context: FlatbuffersIrContext,
 ) : IrElementTransformerVoid() {
@@ -53,14 +59,19 @@ internal class TableBodyLowering(
     )
   private val scalarFieldCache = mutableMapOf<ClassId, ScalarFieldInfo?>()
 
-  override fun visitClass(declaration: IrClass): IrClass {
-    val (tableId, table) = tableInfoFor(declaration) ?: return super.visitClass(declaration)
-    val fieldInfo = scalarFieldInfo(tableId, table) ?: return super.visitClass(declaration)
-    if (declaration.isCompanion) {
-      lowerCompanionAddFunction(declaration, table, fieldInfo)
-    } else {
-      lowerInitReset(declaration)
-      lowerScalarProperty(declaration, fieldInfo)
+  override fun visitClass(declaration: IrClass): IrStatement {
+    val tableInfo = tableInfoFor(declaration)
+    if (tableInfo != null) {
+      val (tableId, table) = tableInfo
+      val fieldInfo = scalarFieldInfo(tableId, table)
+      if (fieldInfo != null) {
+        if (declaration.isCompanion) {
+          lowerCompanionAddFunction(declaration, fieldInfo)
+        } else {
+          lowerInitReset(declaration)
+          lowerScalarProperty(declaration, fieldInfo)
+        }
+      }
     }
     return super.visitClass(declaration)
   }
@@ -68,11 +79,11 @@ internal class TableBodyLowering(
   private fun tableInfoFor(klass: IrClass): Pair<ClassId, ResolvedTable>? {
     val tableClassId =
       if (klass.isCompanion) {
-        (klass.parent as? IrClass)?.symbol?.classId
+        (klass.parent as? IrClass)?.classId
       } else {
-        klass.symbol.classId
+        klass.classId
       } ?: return null
-    val table = context.schemaIndex.tableFor(tableClassId) ?: return null
+    val table = context.schemaIndex.tableFor(classId = tableClassId) ?: return null
     return tableClassId to table
   }
 
@@ -137,45 +148,46 @@ internal class TableBodyLowering(
     val receiver = getter.dispatchReceiverParameter ?: return
     val builder =
       DeclarationIrBuilder(context.pluginContext, getter.symbol, getter.startOffset, getter.endOffset)
-
-    val offsetValue =
-      builder.irCall(symbols.tableOffset).apply {
-        dispatchReceiver = builder.irGet(receiver)
-        putValueArgument(0, builder.irInt(vtableOffsetFor(fieldInfo.index)))
-      }
-    val offsetVar = builder.irTemporary(offsetValue, nameHint = "o")
-    val condition = builder.irEquals(builder.irGet(offsetVar), builder.irInt(0))
-    val defaultExpr = builder.scalarDefaultExpression(fieldInfo.scalarType, fieldInfo.field)
-    val bufferPosExpr =
-      builder.irCall(symbols.tableBufferPosGetter).apply {
-        dispatchReceiver = builder.irGet(receiver)
-      }
-    val bufferExpr =
-      builder.irCall(symbols.tableBufferGetter).apply {
-        dispatchReceiver = builder.irGet(receiver)
-      }
-    val indexExpr = builder.addInts(builder.irGet(offsetVar), bufferPosExpr)
-    val readExpr =
-      builder.irCall(context.symbols.readWriteBufferGetterFor(fieldInfo.scalarType)).apply {
-        dispatchReceiver = bufferExpr
-        putValueArgument(0, indexExpr)
-      }
-    val result =
-      builder.irIfThenElse(
-        getter.returnType,
-        condition,
-        defaultExpr,
-        readExpr,
-      )
     getter.body =
       builder.irBlockBody {
-        +irReturn(result)
+        val condition =
+          irEquals(
+            irCall(this@TableBodyLowering.symbols.tableOffset).apply {
+              dispatchReceiver = irGet(receiver)
+              putValueArgument(0, irInt(vtableOffsetFor(fieldInfo.index)))
+            },
+            irInt(0),
+          )
+        val readExpr =
+          irCall(this@TableBodyLowering.context.symbols.readWriteBufferGetterFor(fieldInfo.scalarType)).apply {
+            dispatchReceiver =
+              irCall(this@TableBodyLowering.symbols.tableBufferGetter).apply {
+                dispatchReceiver = irGet(receiver)
+              }
+            val offsetExpr =
+              irCall(this@TableBodyLowering.symbols.tableOffset).apply {
+                dispatchReceiver = irGet(receiver)
+                putValueArgument(0, irInt(vtableOffsetFor(fieldInfo.index)))
+              }
+            val bufferPosExpr =
+              irCall(this@TableBodyLowering.symbols.tableBufferPosGetter).apply {
+                dispatchReceiver = irGet(receiver)
+              }
+            putValueArgument(0, addInts(offsetExpr, bufferPosExpr))
+          }
+        +irReturn(
+          irIfThenElse(
+            getter.returnType,
+            condition,
+            scalarDefaultExpression(fieldInfo.scalarType, fieldInfo.field),
+            readExpr,
+          )
+        )
       }
   }
 
   private fun lowerCompanionAddFunction(
     companionClass: IrClass,
-    table: ResolvedTable,
     fieldInfo: ScalarFieldInfo,
   ) {
     val addFunctionName = "add${fieldInfo.field.name.replaceFirstChar { it.uppercaseChar() }}"
@@ -200,7 +212,7 @@ internal class TableBodyLowering(
       }
   }
 
-  private fun DeclarationIrBuilder.scalarDefaultExpression(
+  private fun org.jetbrains.kotlin.ir.builders.IrBuilderWithScope.scalarDefaultExpression(
     scalar: ScalarType,
     field: ResolvedField,
   ): IrExpression =
@@ -227,7 +239,7 @@ internal class TableBodyLowering(
       else -> error("Unsupported default value $default for scalar field ${field.name}")
     }
 
-  private fun DeclarationIrBuilder.scalarConstant(
+  private fun org.jetbrains.kotlin.ir.builders.IrBuilderWithScope.scalarConstant(
     scalar: ScalarType,
     value: Any,
   ): IrExpression =
@@ -237,16 +249,28 @@ internal class TableBodyLowering(
       ScalarType.SHORT -> irShort((value as Number).toShort())
       ScalarType.INT -> irInt((value as Number).toInt())
       ScalarType.LONG -> irLong((value as Number).toLong())
-      ScalarType.FLOAT -> irFloat((value as Number).toFloat())
-      ScalarType.DOUBLE -> irDouble((value as Number).toDouble())
+      ScalarType.FLOAT ->
+        IrConstImpl.float(
+          UNDEFINED_OFFSET,
+          UNDEFINED_OFFSET,
+          this@TableBodyLowering.context.pluginContext.irBuiltIns.floatType,
+          (value as Number).toFloat(),
+        )
+      ScalarType.DOUBLE ->
+        IrConstImpl.double(
+          UNDEFINED_OFFSET,
+          UNDEFINED_OFFSET,
+          this@TableBodyLowering.context.pluginContext.irBuiltIns.doubleType,
+          (value as Number).toDouble(),
+        )
       else -> error("Unsupported scalar type $scalar")
     }
 
-  private fun DeclarationIrBuilder.addInts(
+  private fun org.jetbrains.kotlin.ir.builders.IrBuilderWithScope.addInts(
     lhs: IrExpression,
     rhs: IrExpression,
   ): IrExpression =
-    irCall(context.pluginContext.irBuiltIns.intPlusSymbol).apply {
+    irCall(this@TableBodyLowering.context.pluginContext.irBuiltIns.intPlusSymbol).apply {
       putValueArgument(0, lhs)
       putValueArgument(1, rhs)
     }
@@ -262,6 +286,5 @@ internal class TableBodyLowering(
 
 private fun IrSimpleFunction.regularValueParameters(): List<IrValueParameter> =
   parameters.filter { parameter ->
-    parameter.kind == org.jetbrains.kotlin.ir.declarations.IrParameterKind.Regular ||
-      parameter.kind == org.jetbrains.kotlin.ir.declarations.IrParameterKind.Context
+    parameter.kind == IrParameterKind.Regular || parameter.kind == IrParameterKind.Context
   }
