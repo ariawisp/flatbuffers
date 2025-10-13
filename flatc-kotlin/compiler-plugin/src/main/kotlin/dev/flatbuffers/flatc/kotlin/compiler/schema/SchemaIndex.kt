@@ -3,13 +3,16 @@ package dev.flatbuffers.flatc.kotlin.compiler.schema
 import dev.flatbuffers.ast.SourceSpan
 import dev.flatbuffers.semantics.DiagnosticSeverity
 import dev.flatbuffers.semantics.ResolvedDeclaration
+import dev.flatbuffers.semantics.ResolvedNamedType
 import dev.flatbuffers.semantics.ResolvedSchema
+import dev.flatbuffers.semantics.ResolvedTable
 import dev.flatbuffers.semantics.SchemaProcessor
 import dev.flatbuffers.flatc.kotlin.compiler.options.FlatbuffersPluginOptions
 import java.nio.file.Path
 import org.jetbrains.kotlin.cli.common.messages.CompilerMessageSeverity
 import org.jetbrains.kotlin.cli.common.messages.CompilerMessageSourceLocation
 import org.jetbrains.kotlin.cli.common.messages.MessageCollector
+import org.jetbrains.kotlin.name.ClassId
 
 /**
  * Holds the resolved schema data for the current compilation.
@@ -21,6 +24,21 @@ internal class SchemaIndex private constructor(
   val schemas: List<ResolvedSchema> get() = loaded.map { it.analysis.schema }
 
   fun declarationFor(name: String): ResolvedDeclaration? = declarationMap[name]
+
+  fun declarationFor(classId: ClassId): ResolvedDeclaration? =
+    declarationMap[classId.asFqNameString()]
+
+  fun tableFor(classId: ClassId): ResolvedTable? = declarationFor(classId) as? ResolvedTable
+
+  fun tableFor(fqName: String): ResolvedTable? = declarationFor(fqName) as? ResolvedTable
+
+  val rootTables: List<ResolvedTable> by lazy {
+    schemas.flatMap { schema ->
+      schema.rootTypes.mapNotNull { type ->
+        (type as? ResolvedNamedType)?.declaration as? ResolvedTable
+      }
+    }
+  }
 
   data class LoadedSchema(val entry: Path, val analysis: dev.flatbuffers.semantics.SemanticAnalysisResult)
 

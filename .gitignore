@@ -50,6 +50,8 @@ flatbenchmark
 flatbenchmark.exe
 /flatc
 !flatc-kotlin/**
+/flatc-kotlin/build/
+/flatc-kotlin/**/build/
 flatc.exe
 flathash
 flathash.exe

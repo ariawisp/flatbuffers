@@ -47,42 +47,60 @@ from `com.google.flatbuffers.kotlin` in monospace.
 ### Tables
 
 - `class <Name> : Table`
-  - Primary constructor private, parameter-less.
-  - Public `fun init(offset: Int, buffer: ReadWriteBuffer): <Name>`
-  - One property per field:
-    - Scalars → `val` with `lookupField(...) { bb.getX(...) }`.
-    - Structs/tables → overload pair `val foo` + `fun foo(obj: Type): Type?`.
-    - Vectors → `fun foo(index: Int): T`, `val fooLength`, `fun fooAsBuffer()`.
-    - For vector of tables/strings/enums include `fooByKey(...)` helpers when key defined.
-  - `override fun keysCompare(...)` when table has key.
-  - `companion object`
-    - `fun validateVersion()`
-    - `fun asRoot(buffer, obj)`
-    - `fun start<Name>(builder)`
-    - `fun add<Field>(builder, value)`
-    - Vector helpers (`create<Field>Vector`, `start<Field>Vector`)
-    - `fun end<Name>(builder): Offset<<Name>>`
-    - `fun finish<Name>Buffer(...)`, `finishSizePrefixed...`
-    - `fun lookupByKey(...)` when applicable.
-  - Top-level `typealias <Name>OffsetArray = OffsetArray<<Name>>` plus inline factory.
-  - Source: class spans table definition, companion members map to field spans where possible.
+  - Primary constructor private, parameter-less (mirrors generated source).
+  - `fun init(i: Int, buffer: ReadWriteBuffer): <Name>` delegates to `reset`.
+  - `fun reset(i: Int, buffer: ReadWriteBuffer): <Name>` generated only once (IR will provide body).
+  - Field members (for each schema `Field`):
+    - **Scalar** (bool, integer, float): `val foo: <KotlinType> get() = lookupField(vt, default) { bb.getX(it + bufferPos) }`.
+    - **String**: `val foo: String?`, plus `fun fooAsBuffer(): ReadBuffer`.
+    - **Struct**: `val foo: Bar?` (allocates scratch instance), `fun foo(obj: Bar): Bar?`.
+    - **Table**: same pattern but `obj.init(indirect(...))`.
+    - **Union**: `val fooType: UnionType`, `fun foo(obj: Table): Table?`.
+    - **Vector of scalars**: `fun foo(j: Int): T`, `val fooLength: Int`, `fun fooAsBuffer(): ReadBuffer`.
+    - **Vector of structs**: overload with target object parameter.
+    - **Vector of tables**: overloads + `fooByKey(...)` helper when key defined.
+    - **Vector of strings**: `fun foo(j: Int): String?`, `fooLength`, `fooAsBuffer`.
+    - **Vector of unions**: `fun fooType(j: Int): Enum`, `fun foo(obj: Table, j: Int): Table?`.
+    - **Sorted vector**: `fooByKey` overloads for strings/structs/enums per legacy generator.
+    - **Required fields**: property accessor identical; metadata recorded for IR `required`.
+    - **Doc comments**: attach to property/overloads.
+  - `override fun keysCompare(o1: Offset<*>, o2: Offset<*>, buffer: ReadWriteBuffer)` emitted when table has `key`.
+  - Companion members (all MIR-style):
+    - `fun validateVersion()` returns `VERSION_2_0_8`.
+    - `fun asRoot(buffer: ReadWriteBuffer): <Name>` and overload with target instance.
+    - `fun <Name>BufferHasIdentifier(buffer: ReadWriteBuffer): Boolean` if table is root.
+    - `fun start<Name>(builder: FlatBufferBuilder)`.
+    - `fun add<Field>(builder: FlatBufferBuilder, value: <Type>)` for every field.
+    - `fun create<Field>Vector(builder, array)` + `fun start<Field>Vector(builder, numElems)` for vectors.
+    - `fun add<Field>(builder, Offset<*>)`, `add<Field>(builder, VectorOffset<*>)`, `add<Field>(builder, UnionOffset)` as appropriate.
+    - `fun end<Name>(builder): Offset<<Name>>` including `builder.required` calls for fields marked `required`.
+    - `fun finish<Name>Buffer(builder, offset)` and size-prefixed variant when root type matches table.
+    - `fun lookupByKey(obj: <Name>?, vectorLocation: Int, key: <KeyType>, bb: ReadWriteBuffer)` for sorted vectors.
+  - File-level helpers: `typealias <Name>OffsetArray`, inline constructor function.
+  - Source mapping: class uses table span; field accessors/companion functions map to their definition spans.
 
 ### Structs
 
 - `class <Name> : Struct`
-  - `fun init(offset: Int, buffer: ReadWriteBuffer): <Name>`
-  - Field accessors read directly from `bb`.
-  - `companion object` exposes `create<Name>(builder, ...)`.
-  - Inline vector alias same as tables.
+  - `fun init(i: Int, buffer: ReadWriteBuffer): <Name>` assigns `bufferPos` and returns `this`.
+  - Accessors: `val foo: <Type> get() = bb.getX(bufferPos + offset)` for each scalar/enum field.
+  - Nested structs: `fun foo(obj: Nested): Nested = obj.init(bufferPos + offset, bb)`.
+  - Companion functions:
+    - `fun create<Name>(builder: FlatBufferBuilder, field1: T, ...) : Offset<<Name>>` matching legacy ordering (reverse).
+    - `fun create<Name>(builder, fields...)` handles struct alignment (`prep`, `pad`, `put`).
+  - Emit `typealias <Name>OffsetArray` + constructor helper similar to tables.
+  - Doc comments on struct and fields transfer to the generated accessors.
 
 ### Enums
 
 - `@JvmInline value class <Name>(val value: <base Kotlin type>)`
-  - `companion object`
-    - `val <Case>` for each enumerator.
-    - `val names: Array<String>`
-    - `fun name(e: <Name>): String`
-  - `typealias <Name>Array` to corresponding primitive array.
+  - `companion object`:
+    - `val <CASE>` constant for each enumerator.
+    - `val names: Array<String> = arrayOf("CASE_0", ...)`.
+    - `fun name(e: <Name>): String = names[e.value.toInt()]`.
+    - `fun valueOf(name: String): <Name>?` (optional convenience; consider parity).
+  - Emit `typealias <Name>Array = <PrimitiveArray>` for vector helpers.
+  - Attach doc comments for enum and individual constants when present.
 
 ### Unions
 
@@ -91,6 +109,7 @@ from `com.google.flatbuffers.kotlin` in monospace.
   - `fun name`.
 - `typealias <Union>Union = UnionOffset`
   - Additional helpers (e.g., for vector of unions) as needed.
+  - Optional `val values: UByteArray` if parity requires.
 
 ### RPC Services
 
