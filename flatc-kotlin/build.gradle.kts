@@ -11,12 +11,16 @@ plugins {
 }
 
 val kotlinVersion = "2.2.20"
+val intellijVersion = "241.19416.19"
 
 subprojects {
   apply(plugin = "org.jetbrains.kotlin.jvm")
 
   repositories {
     mavenCentral()
+    maven("https://cache-redirector.jetbrains.com/intellij-repository/releases")
+    maven("https://cache-redirector.jetbrains.com/intellij-repository/snapshots")
+    maven("https://cache-redirector.jetbrains.com/intellij-dependencies")
   }
 
   extensions.configure<KotlinJvmProjectExtension> {
@@ -100,10 +104,27 @@ project(":compiler-plugin") {
     add("testRuntimeOnly", "org.junit.platform:junit-platform-launcher:1.10.2")
     add("testImplementation", "org.jetbrains.kotlin:kotlin-compiler-internal-test-framework:$kotlinVersion")
     add("testImplementation", "org.jetbrains.kotlin:kotlin-compiler:$kotlinVersion")
+    add("testImplementation", project(":flatbuffers-runtime"))
     add("testRuntimeOnly", "org.jetbrains.kotlin:kotlin-reflect:$kotlinVersion")
     add("testRuntimeOnly", "org.jetbrains.kotlin:kotlin-test:$kotlinVersion")
     add("testRuntimeOnly", "org.jetbrains.kotlin:kotlin-script-runtime:$kotlinVersion")
     add("testRuntimeOnly", "org.jetbrains.kotlin:kotlin-annotations-jvm:$kotlinVersion")
+    add("testRuntimeOnly", "com.jetbrains.intellij.platform:util-rt:$intellijVersion")
+    add("testRuntimeOnly", "com.jetbrains.intellij.platform:util-class-loader:$intellijVersion")
+    add("testRuntimeOnly", "com.jetbrains.intellij.platform:util:$intellijVersion")
+    add("testRuntimeOnly", "com.jetbrains.intellij.platform:util-base:$intellijVersion")
+    add("testRuntimeOnly", "com.jetbrains.intellij.platform:util-xml-dom:$intellijVersion")
+    add("testRuntimeOnly", "com.jetbrains.intellij.platform:core:$intellijVersion")
+    add("testRuntimeOnly", "com.jetbrains.intellij.platform:core-impl:$intellijVersion")
+    add("testRuntimeOnly", "com.jetbrains.intellij.platform:extensions:$intellijVersion")
+    add("testRuntimeOnly", "com.jetbrains.intellij.platform:diagnostic:$intellijVersion")
+    add("testRuntimeOnly", "com.jetbrains.intellij.platform:diagnostic-telemetry:$intellijVersion")
+    add("testRuntimeOnly", "com.jetbrains.intellij.platform:util-progress:$intellijVersion")
+    add("testRuntimeOnly", "com.jetbrains.intellij.platform:util-coroutines:$intellijVersion")
+    add("testRuntimeOnly", "com.jetbrains.intellij.java:java-frontback-psi:$intellijVersion")
+    add("testRuntimeOnly", "com.jetbrains.intellij.java:java-frontback-psi-impl:$intellijVersion")
+    add("testRuntimeOnly", "com.jetbrains.intellij.java:java-psi:$intellijVersion")
+    add("testRuntimeOnly", "com.jetbrains.intellij.java:java-psi-impl:$intellijVersion")
     flatbuffersCompilerPluginRuntime(project(":compat"))
   }
 

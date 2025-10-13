@@ -11,4 +11,5 @@ include(
   ":cli",
   ":compiler-plugin",
   ":compat",
+  ":flatbuffers-runtime",
 )

@@ -42,16 +42,7 @@ class FlatbuffersSampleIrTest : AbstractFlatbuffersIrTest() {
   @Test
   fun sampleTableLowering() {
     val testFile = dataRoot.resolve("ir/sample/sample.kt")
-    try {
-      runTest(testFile.toString())
-    } catch (error: NoSuchMethodError) {
-      if (error.message?.contains("disposeRootInWriteAction") != true) {
-        throw error
-      }
-      // The test framework expects IntelliJ write-action helpers that are unavailable in this
-      // simplified test environment. Assertions have already executed via the IR handler, so we
-      // can ignore the disposal failure.
-    }
+    runTest(testFile.toString())
   }
 }
 
