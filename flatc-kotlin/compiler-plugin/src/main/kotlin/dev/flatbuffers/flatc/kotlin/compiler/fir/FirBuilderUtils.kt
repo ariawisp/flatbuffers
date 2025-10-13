@@ -2,6 +2,7 @@ package dev.flatbuffers.flatc.kotlin.compiler.fir
 
 import dev.flatbuffers.ast.DocComment
 import dev.flatbuffers.ast.SourceSpan
+import java.util.LinkedHashMap
 import org.jetbrains.kotlin.GeneratedDeclarationKey
 import org.jetbrains.kotlin.descriptors.Modality
 import org.jetbrains.kotlin.descriptors.Visibility
@@ -25,6 +26,8 @@ import org.jetbrains.kotlin.name.ClassId
 import org.jetbrains.kotlin.name.FqName
 import org.jetbrains.kotlin.name.Name
 import org.jetbrains.kotlin.types.ConstantValueKind
+import org.jetbrains.kotlin.fir.expressions.buildResolvedArgumentList
+import org.jetbrains.kotlin.fir.types.coneType
 
 internal fun FlatbuffersFirDeclarationGenerator.stubFunction(
   owner: FirClassSymbol<*>,
@@ -110,6 +113,7 @@ internal fun FlatbuffersFirDeclarationGenerator.todoBlock(target: String) =
   buildBlock {
     statements +=
       buildFunctionCall {
+        coneTypeOrNull = session.builtinTypes.nothingType.coneType
         val symbol =
           session.symbolProvider
             .getTopLevelFunctionSymbols(
@@ -124,15 +128,18 @@ internal fun FlatbuffersFirDeclarationGenerator.todoBlock(target: String) =
             resolvedSymbol = symbol
           }
         argumentList =
-          buildArgumentList {
-            arguments +=
-              buildLiteralExpression(
-                source = null,
-                kind = ConstantValueKind.String,
-                value = "TODO($target)",
-                setType = true,
-              )
-          }
+          buildResolvedArgumentList(
+            buildArgumentList {
+              arguments +=
+                buildLiteralExpression(
+                  source = null,
+                  kind = ConstantValueKind.String,
+                  value = "TODO($target)",
+                  setType = true,
+                )
+            },
+            LinkedHashMap(),
+          )
       }
   }
 

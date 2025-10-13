@@ -275,8 +275,8 @@ internal class TableBodyLowering(
     rhs: IrExpression,
   ): IrExpression =
     irCall(this@TableBodyLowering.context.pluginContext.irBuiltIns.intPlusSymbol).apply {
-      putValueArgument(0, lhs)
-      putValueArgument(1, rhs)
+      dispatchReceiver = lhs
+      putValueArgument(0, rhs)
     }
 
   private fun vtableOffsetFor(fieldIndex: Int): Int = 4 + fieldIndex * 2

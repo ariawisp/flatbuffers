@@ -64,7 +64,7 @@ internal class FlatbuffersIrSymbols(
 
   val readWriteBufferGetInt: IrSimpleFunctionSymbol by lazy { findReadWriteBufferGetter("getInt") }
   val readWriteBufferGetShort: IrSimpleFunctionSymbol by lazy { findReadWriteBufferGetter("getShort") }
-  val readWriteBufferGetByte: IrSimpleFunctionSymbol by lazy { findReadWriteBufferGetter("getByte") }
+  val readWriteBufferGetByte: IrSimpleFunctionSymbol by lazy { findReadWriteBufferGetter("get", irBuiltIns.byteType) }
   val readWriteBufferGetBoolean: IrSimpleFunctionSymbol by lazy { findReadWriteBufferGetter("getBoolean") }
   val readWriteBufferGetLong: IrSimpleFunctionSymbol by lazy { findReadWriteBufferGetter("getLong") }
   val readWriteBufferGetFloat: IrSimpleFunctionSymbol by lazy { findReadWriteBufferGetter("getFloat") }
@@ -126,10 +126,12 @@ internal class FlatbuffersIrSymbols(
       ?.symbol
       ?: error("Property $name not found on Table class")
 
-  private fun findReadWriteBufferGetter(name: String): IrSimpleFunctionSymbol =
+  private fun findReadWriteBufferGetter(name: String, returnType: IrType? = null): IrSimpleFunctionSymbol =
     readWriteBufferClass.findFunction(name) { function ->
       function.regularValueParameters().let { parameters ->
-        parameters.size == 1 && parameters[0].type == irBuiltIns.intType
+        val matchesParameters = parameters.size == 1 && parameters[0].type == irBuiltIns.intType
+        val matchesReturn = returnType?.let { function.returnType == it } ?: true
+        matchesParameters && matchesReturn
       }
     }
 
