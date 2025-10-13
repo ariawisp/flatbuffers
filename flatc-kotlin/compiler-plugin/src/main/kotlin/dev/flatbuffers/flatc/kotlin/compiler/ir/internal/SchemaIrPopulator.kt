@@ -11,6 +11,9 @@ internal class SchemaIrPopulator(
       SchemaProvenanceIrTransformer(context),
     )
     moduleFragment.transformChildrenVoid(
+      TableBodyLowering(context),
+    )
+    moduleFragment.transformChildrenVoid(
       TableCompanionEndLowering(context),
     )
   }

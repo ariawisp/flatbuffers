@@ -1,9 +1,9 @@
 package dev.flatbuffers.flatc.kotlin.compiler.ir.internal
 
 import dev.flatbuffers.flatc.kotlin.compat.CompatContext
+import dev.flatbuffers.flatc.kotlin.compiler.fir.SchemaSourceIndex
 import dev.flatbuffers.flatc.kotlin.compiler.options.FlatbuffersPluginOptions
 import dev.flatbuffers.flatc.kotlin.compiler.schema.SchemaIndex
-import dev.flatbuffers.flatc.kotlin.compiler.fir.SchemaSourceIndex
 import org.jetbrains.kotlin.backend.common.extensions.IrPluginContext
 import org.jetbrains.kotlin.cli.common.messages.MessageCollector
 import org.jetbrains.kotlin.incremental.components.ExpectActualTracker
@@ -18,4 +18,5 @@ internal class FlatbuffersIrContext(
   val lookupTracker: LookupTracker?,
   val expectActualTracker: ExpectActualTracker,
   val schemaSourceIndex: SchemaSourceIndex = SchemaSourceIndex(),
+  val symbols: FlatbuffersIrSymbols = FlatbuffersIrSymbols(pluginContext),
 )
